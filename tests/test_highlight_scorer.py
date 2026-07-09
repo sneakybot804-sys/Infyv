@@ -170,10 +170,10 @@ def test_to_json_schema_keys() -> None:
     }
 
 
-def test_score_file_and_score_to_file(tmp_path, monkeypatch) -> None:
-    from config import config as app_config
+def test_score_file_and_score_to_file(tmp_path) -> None:
+    from config import AppConfig, PathConfig
 
-    monkeypatch.setattr(type(app_config.paths), "base_dir", tmp_path, raising=False)
+    app_config = AppConfig(paths=PathConfig(base_dir=tmp_path))
 
     analysis_path = tmp_path / "clip_analysis.json"
     scene = _scene(0, 0, 8, motion=40, brightness=120, static=0.1)

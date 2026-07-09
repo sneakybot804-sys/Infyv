@@ -8,9 +8,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Iterator, Sequence
 
 import ffmpeg  # ffmpeg-python
+import numpy as np
 
 from config import AppConfig, config
 from logger import get_logger
@@ -185,6 +186,109 @@ class FFmpegService:
             self._raise_run_error("extract_audio", exc)
 
         return output
+
+    # ------------------------------------------------------------------ #
+    # Audio streaming (Phase 5C; additive, backward-compatible)
+    # ------------------------------------------------------------------ #
+    def count_audio_streams(self, media_path: str | Path) -> int:
+        """Return the number of audio streams in a media file.
+
+        Used by the Phase 5C analyzer for automatic track detection. Existing
+        callers are unaffected.
+        """
+        path = self._validate_input(media_path)
+        try:
+            probe: dict[str, Any] = ffmpeg.probe(str(path))
+        except ffmpeg.Error as exc:
+            message = self._decode_stderr(exc)
+            logger.error("ffprobe failed for %s: %s", path, message)
+            raise FFmpegServiceError(
+                f"Could not probe '{path}': {message}"
+            ) from exc
+        return sum(
+            1
+            for s in probe.get("streams", [])
+            if s.get("codec_type") == "audio"
+        )
+
+    def stream_pcm_blocks(
+        self,
+        media_path: str | Path,
+        *,
+        sample_rate: int = 16000,
+        stream_index: int = 0,
+        block_seconds: float = 30.0,
+    ) -> Iterator[np.ndarray]:
+        """Yield mono float32 PCM blocks from one audio stream via a pipe.
+
+        Decodes to mono at ``sample_rate`` and streams the raw PCM out of
+        FFmpeg's stdout in bounded chunks, so no whole-track buffer and no
+        temporary file are ever created (Phase 5C sections 8.1/8.4).
+
+        Args:
+            media_path: Source media file.
+            sample_rate: Target (analysis) sample rate; mono.
+            stream_index: Audio stream index within the source (0-based).
+            block_seconds: Approximate seconds of audio per yielded block.
+
+        Yields:
+            1-D ``float32`` numpy arrays in the range [-1, 1].
+
+        Raises:
+            FFmpegServiceError: if the stream is missing or decoding fails.
+        """
+        path = self._validate_input(media_path)
+        if sample_rate <= 0:
+            raise FFmpegServiceError("sample_rate must be positive.")
+        if block_seconds <= 0:
+            raise FFmpegServiceError("block_seconds must be positive.")
+
+        bytes_per_sample = 4  # float32 little-endian
+        block_samples = max(int(round(block_seconds * sample_rate)), 1)
+        chunk_bytes = block_samples * bytes_per_sample
+
+        process = None
+        try:
+            process = (
+                ffmpeg
+                .input(str(path))
+                .output(
+                    "pipe:",
+                    format="f32le",
+                    acodec="pcm_f32le",
+                    ac=1,
+                    ar=sample_rate,
+                    map=f"0:a:{stream_index}",
+                    vn=None,
+                )
+                .global_args("-nostdin", "-loglevel", "error")
+                .run_async(pipe_stdout=True, pipe_stderr=True)
+            )
+            while True:
+                raw = process.stdout.read(chunk_bytes)
+                if not raw:
+                    break
+                yield np.frombuffer(raw, dtype="<f4").astype(np.float32, copy=False)
+            process.wait()
+            if process.returncode not in (0, None):
+                stderr = process.stderr.read() if process.stderr else b""
+                message = stderr.decode("utf-8", errors="replace").strip()
+                raise FFmpegServiceError(
+                    f"stream_pcm_blocks failed (stream {stream_index}): {message}"
+                )
+        except ffmpeg.Error as exc:  # pragma: no cover - defensive
+            self._raise_run_error("stream_pcm_blocks", exc)
+        finally:
+            if process is not None:
+                for pipe in (process.stdout, process.stderr):
+                    try:
+                        if pipe is not None:
+                            pipe.close()
+                    except Exception:  # pragma: no cover - best effort cleanup
+                        pass
+                if process.poll() is None:  # pragma: no cover - defensive
+                    process.kill()
+                    process.wait()
 
     def extract_frames(
         self,
