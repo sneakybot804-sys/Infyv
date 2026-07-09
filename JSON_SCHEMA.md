@@ -210,6 +210,60 @@ Notes:
 - `top_n` in `FusionConfig` controls selection: `None` keeps all scenes, a
   positive integer keeps the top-N by fused score.
 
+## edit_plan.json (Phase 5E) — `schema_version: "5e.1"`
+
+Produced by `DecisionAgent`. A pure consumer that reads
+`enriched_highlight.json` (`5d.1`) and decides which scenes become clips,
+either via a local Ollama model or a deterministic fallback. Written to
+`output/<video_name>_edit_plan.json` (never overwritten). No producer
+artifact is modified. The Phase 6 renderer consumes this schema unchanged.
+
+Input:
+- `enriched_highlight.json` (`5d.1`) — **required**. Missing → `DecisionError`.
+- `analysis.json` (`4a.1`) — optional, used only for metadata context.
+
+```json
+{
+  "schema_version": "5e.1",
+  "source_video": "C:/path/to/videos/clip.mp4",
+  "decision_source": "llm",
+  "segments": [
+    {
+      "id": "segment-0001",
+      "source_scene_index": 3,
+      "start": 61.2,
+      "end": 68.9,
+      "score": 87.0,
+      "reason": "score 87.0, Excellent"
+    }
+  ]
+}
+```
+
+### Field reference
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `schema_version` | string | Schema identifier (`5e.1`). |
+| `source_video` | string | Path to the video (from the enriched artifact). |
+| `decision_source` | string | `"llm"` if the model produced the plan, `"fallback"` if the deterministic selection did. |
+| `segments[].id` | string | Stable id (`segment-NNNN`). |
+| `segments[].source_scene_index` | int | Phase 4A scene index the clip comes from. |
+| `segments[].start/end` | float (s) | Clip bounds (scene bounds ± configured padding). |
+| `segments[].score` | float 0..100 | Fused score carried from `enriched_highlight.json`. |
+| `segments[].reason` | string | One short justification for keeping the clip. |
+
+Notes:
+- **Selection is configuration-driven** (`DecisionConfig`): a
+  `FallbackStrategy` of `top_n`, `threshold` or `hybrid`, with
+  `max_segments`, `top_n` and `min_score` caps.
+- **LLM is best-effort.** The model response is validated against this
+  schema; any failure (unreachable / invalid JSON / schema violation) falls
+  back to the deterministic selection, so plan generation never hard-fails on
+  an LLM problem.
+- Segments may be padded (`pre_roll_seconds` / `post_roll_seconds`) and
+  merged when adjacent (`merge_gap_seconds`), then re-numbered.
+
 ## Versioning policy
 
 - `schema_version` is mandatory in every artifact.

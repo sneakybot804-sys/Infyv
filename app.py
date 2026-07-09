@@ -18,6 +18,8 @@ from highlight_scorer import HighlightScorer, HighlightScorerError
 from hud_text_extractor import HudTextExtractor
 from logger import get_logger
 from ocr_config import OcrError
+from decision_agent import DecisionAgent
+from decision_config import DecisionError
 from signal_fusion import SignalFusionEngine
 from signal_fusion_config import FusionError
 from video_analyzer import VideoAnalyzer, VideoAnalyzerError
@@ -254,6 +256,39 @@ def run_fusion() -> int:
     return 0
 
 
+def run_decision() -> int:
+    """Run the Phase 5E AI decision flow over a video's enriched artifact.
+
+    Picks a video, auto-discovers the matching
+    ``output/<video>_enriched_highlight.json`` (required) plus optional
+    ``_analysis.json`` (for metadata), and writes
+    ``output/<video>_edit_plan.json``. When the LLM is unavailable or returns
+    an invalid plan, a deterministic fallback selection is used instead.
+    """
+    print("=" * 60)
+    print("  Local AI Gaming Video Editor - AI Decision (Phase 5E)")
+    print("=" * 60)
+
+    try:
+        video_path = VideoPicker(config).pick()
+    except (KeyboardInterrupt, EOFError):
+        print("\nCancelled.")
+        return 130
+    except VideoPickerError as exc:
+        print(f"No video selected: {exc}")
+        return 1
+
+    try:
+        output = DecisionAgent(config).decide_to_file(video_path)
+    except DecisionError as exc:
+        logger.error("Decision error: %s", exc)
+        print(f"\nDecision failed: {exc}")
+        return 2
+
+    print(f"\nEdit plan written to: {output}")
+    return 0
+
+
 def choose_action() -> str:
     """Prompt the user to pick a top-level action."""
     print("=" * 60)
@@ -265,6 +300,7 @@ def choose_action() -> str:
     print("  4. Analyze audio (Phase 5C)")
     print("  5. Extract HUD text / OCR (Phase 5B)")
     print("  6. Fuse signals (Phase 5D)")
+    print("  7. Generate edit plan from highlights (Phase 5E)")
     print("  q. Quit")
     return input("Choose an option > ").strip().lower()
 
@@ -291,6 +327,8 @@ def run() -> int:
         return run_ocr()
     if choice in {"6", "fuse", "fusion"}:
         return run_fusion()
+    if choice in {"7", "decide", "plan", "decision"}:
+        return run_decision()
     if choice in {"q", "quit", "exit"}:
         return 0
 
