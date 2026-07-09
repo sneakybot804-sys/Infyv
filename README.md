@@ -19,7 +19,91 @@ Scoring is fully configurable via `HighlightScoringConfig`. See `SCORING.md`
 for the formula, weighting and thresholds, and `JSON_SCHEMA.md` for the
 output schema.
 
+## OCR Setup (Phase 5B)
 
+Phase 5B extracts on-screen HUD text (menu option 5) using OCR. It has two
+separate parts you must install:
+
+1. **The Python wrapper** (`pytesseract`) — installed from `requirements.txt`.
+2. **The native Tesseract OCR engine** — an external program you install
+   yourself. This project does **not** bundle, download, or auto-install it.
+
+OCR only runs on the configured static regions (ROIs) of a few sampled
+frames per scene; it never OCRs full frames.
+
+### 1. Install the Python dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+This installs `pytesseract` (the Python binding). The binding alone does not
+include the OCR engine — continue to step 2.
+
+### 2. Install the native Tesseract binary
+
+- **Windows:** download and run the installer from the UB-Mannheim build
+  (`https://github.com/UB-Mannheim/tesseract/wiki`). Note the install
+  directory, typically `C:\Program Files\Tesseract-OCR`.
+- **macOS:** `brew install tesseract`
+- **Linux (Debian/Ubuntu):** `sudo apt-get install tesseract-ocr`
+
+English language data (`eng`) is included by default, which is all Phase 5B
+requires.
+
+### 3. Add Tesseract to PATH (Windows)
+
+Add the install directory (e.g. `C:\Program Files\Tesseract-OCR`) to your
+system `PATH` so `tesseract.exe` is discoverable:
+
+- Windows Settings → *Edit the system environment variables* → *Environment
+  Variables* → select `Path` → *Edit* → *New* → paste the directory → OK.
+- Open a **new** terminal afterwards so the updated PATH takes effect.
+
+Alternatively, without editing PATH, point `pytesseract` at the binary in
+your own environment/config:
+
+```python
+import pytesseract
+pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+```
+
+### 4. Verify the installation
+
+```bash
+tesseract --version        # should print the Tesseract version
+python -c "import pytesseract; print(pytesseract.get_tesseract_version())"
+```
+
+If both commands print a version, OCR is ready. Run it via:
+
+```bash
+python app.py    # choose option 5 (Extract HUD text / OCR)
+```
+
+Output: `output/<video_name>_ocr.json` (schema `5b.1`, never overwritten).
+
+### 5. Common Windows troubleshooting
+
+- **`TesseractNotFoundError` / "tesseract is not installed or it's not in
+  your PATH":** the native binary isn't on PATH. Re-check step 3, open a new
+  terminal, or set `tesseract_cmd` explicitly as shown above.
+- **`tesseract --version` works in one terminal but not the app:** the app
+  was launched from a terminal opened *before* the PATH change. Close and
+  reopen the terminal / IDE.
+- **Installed but still not found:** confirm you added the folder that
+  contains `tesseract.exe` (not a parent folder), and that the installer
+  actually completed.
+- **Non-English or missing language data:** Phase 5B only needs `eng`
+  (bundled). If you removed it, re-run the installer and keep the English
+  language pack.
+- **Poor accuracy on stylized HUD fonts:** expected for some games; the
+  extractor already applies grayscale/threshold/upscale to ROI crops. Tune
+  the ROIs and preprocessing in `OcrConfig`.
+
+The Python dependency (`pytesseract`) and the native executable are
+deliberately kept separate: the project declares only the Python binding and
+never installs system software on your behalf.
 
 ## Getting started
 

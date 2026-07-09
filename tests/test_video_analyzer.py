@@ -89,8 +89,11 @@ def test_compute_motion_shape_mismatch_returns_zero() -> None:
 # --------------------------------------------------------------------- #
 # Full pipeline against synthetic videos
 # --------------------------------------------------------------------- #
-def _analyzer(duration: float, fps: float = 8.0) -> VideoAnalyzer:
+def _analyzer(
+    duration: float, fps: float = 8.0, app_config=None
+) -> VideoAnalyzer:
     return VideoAnalyzer(
+        app_config=app_config,
         analysis_config=GenericAnalysisConfig(
             sample_fps=8.0,
             min_idle_seconds=1.0,
@@ -168,13 +171,16 @@ def test_to_json_roundtrip_schema(synthetic_video) -> None:
         assert key in data
 
 
-def test_analyze_to_file_never_overwrites(synthetic_video, tmp_path, monkeypatch) -> None:
-    from config import config as app_config
+def test_analyze_to_file_never_overwrites(synthetic_video, tmp_path) -> None:
+    from config import AppConfig, PathConfig
 
-    monkeypatch.setattr(type(app_config.paths), "base_dir", tmp_path, raising=False)
+    # Inject an isolated config rather than mutating the shared PathConfig
+    # class: the latter redirects the global logger's file handler into
+    # tmp_path and leaves an open handle, which breaks tmp cleanup on Windows.
+    app_config = AppConfig(paths=PathConfig(base_dir=tmp_path))
     video = synthetic_video([("static", 1.0)])
 
-    analyzer = _analyzer(duration=1.0)
+    analyzer = _analyzer(duration=1.0, app_config=app_config)
     first = analyzer.analyze_to_file(video)
     second = analyzer.analyze_to_file(video)
 
