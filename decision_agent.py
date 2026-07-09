@@ -195,7 +195,10 @@ class DecisionAgent:
             try:
                 segments = self._llm_segments(candidates, video)
                 decision_source = "llm"
-            except DecisionError as exc:
+            except (DecisionError, Exception) as exc:
+                # Any LLM problem (unreachable client, invalid JSON, schema
+                # violation, or an unexpected client error) is non-fatal:
+                # fall back to the deterministic selection.
                 logger.warning("LLM decision failed (%s); using fallback.", exc)
                 segments = None
 
@@ -436,6 +439,11 @@ class DecisionAgent:
                 merged.append(self._segment_span(cur_seg, cur_start, cur_end))
                 cur_start, cur_end, cur_seg = start, end, seg
         merged.append(self._segment_span(cur_seg, cur_start, cur_end))
+
+        # Chronological order was only needed to detect adjacency for the
+        # merge. Restore the selection order (score desc, tie-break by scene
+        # index) so TOP_N / HYBRID output preserves descending score/rank.
+        merged.sort(key=lambda s: (-s.score, s.source_scene_index))
 
         merged = merged[: cfg.max_segments]
         for i, seg in enumerate(merged, start=1):
