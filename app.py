@@ -20,9 +20,11 @@ from logger import get_logger
 from ocr_config import OcrError
 from decision_agent import DecisionAgent
 from decision_config import DecisionError
+from editor_config import EditorError
 from signal_fusion import SignalFusionEngine
 from signal_fusion_config import FusionError
 from video_analyzer import VideoAnalyzer, VideoAnalyzerError
+from video_editor import VideoEditor
 from video_picker import VideoPicker, VideoPickerError
 
 logger = get_logger(__name__)
@@ -289,6 +291,37 @@ def run_decision() -> int:
     return 0
 
 
+def run_render() -> int:
+    """Run the Phase 6 render flow over a video's edit plan.
+
+    Picks a video, auto-discovers the matching
+    ``output/<video>_edit_plan.json``, trims the planned segments and
+    concatenates them into ``output/<video>_reel.mp4``.
+    """
+    print("=" * 60)
+    print("  Local AI Gaming Video Editor - Render Highlights (Phase 6)")
+    print("=" * 60)
+
+    try:
+        video_path = VideoPicker(config).pick()
+    except (KeyboardInterrupt, EOFError):
+        print("\nCancelled.")
+        return 130
+    except VideoPickerError as exc:
+        print(f"No video selected: {exc}")
+        return 1
+
+    try:
+        output = VideoEditor(config).render_files(video_path)
+    except EditorError as exc:
+        logger.error("Render error: %s", exc)
+        print(f"\nRender failed: {exc}")
+        return 2
+
+    print(f"\nHighlight reel written to: {output}")
+    return 0
+
+
 def choose_action() -> str:
     """Prompt the user to pick a top-level action."""
     print("=" * 60)
@@ -301,6 +334,7 @@ def choose_action() -> str:
     print("  5. Extract HUD text / OCR (Phase 5B)")
     print("  6. Fuse signals (Phase 5D)")
     print("  7. Generate edit plan from highlights (Phase 5E)")
+    print("  8. Render highlight reel (Phase 6)")
     print("  q. Quit")
     return input("Choose an option > ").strip().lower()
 
@@ -329,6 +363,8 @@ def run() -> int:
         return run_fusion()
     if choice in {"7", "decide", "plan", "decision"}:
         return run_decision()
+    if choice in {"8", "render", "reel", "edit"}:
+        return run_render()
     if choice in {"q", "quit", "exit"}:
         return 0
 
