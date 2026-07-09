@@ -138,6 +138,78 @@ Units: motion/brightness are 0..255 image-space values; static is 0..1.
 | `highlights[].signals` | object | Per-signal contributions (0..1). |
 | `highlights[].ocr` | list[string] | OCR text captured in the window. |
 
+## enriched_highlight.json (Phase 5D) — `schema_version: "5d.1"`
+
+Produced by `SignalFusionEngine`. A pure consumer that fuses the frozen
+Phase 5 artifacts at **scene level** into a ranked artifact. Written to
+`output/<video_name>_enriched_highlight.json` (never overwritten). No
+existing artifact is modified.
+
+Inputs (aligned by scene index — `highlight.index` == `ocr`/`audio`
+`scene_index`):
+- `highlight.json` (`5a.1`) — **required** backbone. A missing highlight
+  artifact raises `FusionError`.
+- `ocr.json` (`5b.1`) — optional. Missing → the OCR signal contributes 0.
+- `audio.json` (`5c.1`) — optional. Missing → the audio signals contribute 0.
+
+Scores are exposed on the same **0..100** scale as Phase 5A.
+
+```json
+{
+  "schema_version": "5d.1",
+  "video": "C:/path/to/videos/clip.mp4",
+  "sources": {
+    "highlight": { "available": true, "schema_version": "5a.1" },
+    "ocr":       { "available": true, "schema_version": "5b.1" },
+    "audio":     { "available": false, "schema_version": null }
+  },
+  "scenes": [
+    {
+      "index": 3,
+      "start": 61.2,
+      "end": 68.9,
+      "duration": 7.7,
+      "score": 87.0,
+      "classification": "Excellent",
+      "rank": 1,
+      "signals": {
+        "base_highlight": 0.74,
+        "ocr": 0.90,
+        "audio_energy": 0.0,
+        "voice_excitement": 0.0
+      },
+      "ocr": ["TRIPLE KILL"]
+    }
+  ]
+}
+```
+
+### Field reference
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `schema_version` | string | Schema identifier (`5d.1`). |
+| `video` | string | Path to the video (from the highlight artifact). |
+| `sources.<name>.available` | bool | Whether that input artifact was present. |
+| `sources.<name>.schema_version` | string\|null | Input artifact schema, or null if absent. |
+| `scenes[].index` | int | Phase 4A scene index (backbone identity). |
+| `scenes[].start/end/duration` | float (s) | Scene bounds (from the highlight artifact). |
+| `scenes[].score` | float 0..100 | Fused score (0..1 internally, scaled to 0..100). |
+| `scenes[].classification` | string | `Excellent`/`Good`/`Average`/`Ignore` (fused thresholds). |
+| `scenes[].rank` | int | 1-based rank by fused score (deterministic). |
+| `scenes[].signals` | object | Per-signal 0..1 contributions before weighting. |
+| `scenes[].signals.base_highlight` | float 0..1 | Normalized Phase 5A score. |
+| `scenes[].signals.ocr` | float 0..1 | Normalized max OCR confidence in the scene. |
+| `scenes[].signals.audio_energy` | float 0..1 | Normalized max acoustic-event energy in the scene. |
+| `scenes[].signals.voice_excitement` | float 0..1 | Normalized max commentary excitement peak in the scene. |
+| `scenes[].ocr` | list[string] | OCR text captured in the scene (transparency). |
+
+Notes:
+- **Scene-level only.** Detections / events / peaks with a null
+  `scene_index` contribute to no scene; time-window fusion is deferred.
+- `top_n` in `FusionConfig` controls selection: `None` keeps all scenes, a
+  positive integer keeps the top-N by fused score.
+
 ## Versioning policy
 
 - `schema_version` is mandatory in every artifact.

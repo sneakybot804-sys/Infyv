@@ -18,6 +18,8 @@ from highlight_scorer import HighlightScorer, HighlightScorerError
 from hud_text_extractor import HudTextExtractor
 from logger import get_logger
 from ocr_config import OcrError
+from signal_fusion import SignalFusionEngine
+from signal_fusion_config import FusionError
 from video_analyzer import VideoAnalyzer, VideoAnalyzerError
 from video_picker import VideoPicker, VideoPickerError
 
@@ -210,6 +212,48 @@ def run_ocr() -> int:
     return 0
 
 
+def run_fusion() -> int:
+    """Run the Phase 5D signal-fusion flow over a video's artifacts.
+
+    Picks a video, auto-discovers the matching
+    ``output/<video>_highlight.json`` (required) plus optional
+    ``_ocr.json`` / ``_audio.json``, and writes
+    ``output/<video>_enriched_highlight.json``. Missing OCR/audio artifacts
+    never fail fusion; a missing highlight artifact does.
+    """
+    print("=" * 60)
+    print("  Local AI Gaming Video Editor - Signal Fusion (Phase 5D)")
+    print("=" * 60)
+
+    try:
+        video_path = VideoPicker(config).pick()
+    except (KeyboardInterrupt, EOFError):
+        print("\nCancelled.")
+        return 130
+    except VideoPickerError as exc:
+        print(f"No video selected: {exc}")
+        return 1
+
+    stem = Path(video_path).stem
+    out_dir = config.paths.output_dir
+    for kind in ("ocr", "audio"):
+        candidate = out_dir / f"{stem}_{kind}.json"
+        if candidate.is_file():
+            print(f"Using {kind} artifact: {candidate}")
+        else:
+            print(f"No matching {kind}.json found; that signal contributes 0.")
+
+    try:
+        output = SignalFusionEngine(config).fuse_to_file(video_path)
+    except FusionError as exc:
+        logger.error("Fusion error: %s", exc)
+        print(f"\nFusion failed: {exc}")
+        return 2
+
+    print(f"\nEnriched highlights written to: {output}")
+    return 0
+
+
 def choose_action() -> str:
     """Prompt the user to pick a top-level action."""
     print("=" * 60)
@@ -220,6 +264,7 @@ def choose_action() -> str:
     print("  3. Score highlights (Phase 5A)")
     print("  4. Analyze audio (Phase 5C)")
     print("  5. Extract HUD text / OCR (Phase 5B)")
+    print("  6. Fuse signals (Phase 5D)")
     print("  q. Quit")
     return input("Choose an option > ").strip().lower()
 
@@ -244,6 +289,8 @@ def run() -> int:
         return run_audio_analysis()
     if choice in {"5", "ocr", "text"}:
         return run_ocr()
+    if choice in {"6", "fuse", "fusion"}:
+        return run_fusion()
     if choice in {"q", "quit", "exit"}:
         return 0
 
