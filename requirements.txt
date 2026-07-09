@@ -3,3 +3,8 @@ opencv-python
 scenedetect[opencv]
 numpy
 pytest
+# Phase 5B OCR (default Tesseract backend). Python wrapper only.
+# The native Tesseract executable is a separate prerequisite; see the
+# "OCR Setup (Phase 5B)" section in README.md. It is NOT bundled or
+# auto-installed by this project.
+pytesseract

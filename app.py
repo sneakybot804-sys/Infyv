@@ -15,7 +15,9 @@ from audio_analyzer import AudioAnalyzer
 from audio_config import AudioAnalyzerError
 from config import config
 from highlight_scorer import HighlightScorer, HighlightScorerError
+from hud_text_extractor import HudTextExtractor
 from logger import get_logger
+from ocr_config import OcrError
 from video_analyzer import VideoAnalyzer, VideoAnalyzerError
 from video_picker import VideoPicker, VideoPickerError
 
@@ -165,6 +167,49 @@ def run_audio_analysis() -> int:
     return 0
 
 
+def run_ocr() -> int:
+    """Run the Phase 5B HUD text extraction (OCR) flow over a video.
+
+    Picks a video, automatically uses the matching
+    ``output/<video>_analysis.json`` when it exists (optional scene prior),
+    and writes ``output/<video>_ocr.json``. OCR runs only on configured
+    static ROIs of sampled frames.
+    """
+    print("=" * 60)
+    print("  Local AI Gaming Video Editor - HUD Text Extraction (Phase 5B)")
+    print("=" * 60)
+
+    try:
+        video_path = VideoPicker(config).pick()
+    except (KeyboardInterrupt, EOFError):
+        print("\nCancelled.")
+        return 130
+    except VideoPickerError as exc:
+        print(f"No video selected: {exc}")
+        return 1
+
+    analysis_candidate = (
+        config.paths.output_dir / f"{Path(video_path).stem}_analysis.json"
+    )
+    analysis_path = analysis_candidate if analysis_candidate.is_file() else None
+    if analysis_path is not None:
+        print(f"Using analysis for scene mapping: {analysis_path}")
+    else:
+        print("No matching analysis.json found; scene_index will be null.")
+
+    try:
+        output = HudTextExtractor(config).extract_to_file(
+            video_path, analysis_path=analysis_path
+        )
+    except OcrError as exc:
+        logger.error("OCR error: %s", exc)
+        print(f"\nOCR failed: {exc}")
+        return 2
+
+    print(f"\nOCR written to: {output}")
+    return 0
+
+
 def choose_action() -> str:
     """Prompt the user to pick a top-level action."""
     print("=" * 60)
@@ -174,6 +219,7 @@ def choose_action() -> str:
     print("  2. Analyze video (Phase 4A, generic)")
     print("  3. Score highlights (Phase 5A)")
     print("  4. Analyze audio (Phase 5C)")
+    print("  5. Extract HUD text / OCR (Phase 5B)")
     print("  q. Quit")
     return input("Choose an option > ").strip().lower()
 
@@ -196,6 +242,8 @@ def run() -> int:
         return run_scoring()
     if choice in {"4", "audio"}:
         return run_audio_analysis()
+    if choice in {"5", "ocr", "text"}:
+        return run_ocr()
     if choice in {"q", "quit", "exit"}:
         return 0
 

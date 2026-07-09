@@ -290,6 +290,75 @@ class FFmpegService:
                     process.kill()
                     process.wait()
 
+    def extract_frame_at(
+        self,
+        video_path: str | Path,
+        timestamp: float,
+    ) -> np.ndarray:
+        """Decode a single BGR frame at ``timestamp`` (seconds) via a pipe.
+
+        Additive, backward-compatible method used by the Phase 5B OCR
+        extractor. Seeks to ``timestamp`` and returns exactly one decoded
+        frame as an ``(H, W, 3)`` uint8 numpy array (BGR, matching OpenCV
+        convention). No temporary file is created.
+
+        Args:
+            video_path: Source video file.
+            timestamp: Seek time in seconds (>= 0).
+
+        Returns:
+            An ``(H, W, 3)`` uint8 BGR frame.
+
+        Raises:
+            FFmpegServiceError: if the timestamp is invalid, the video has no
+                video stream, or decoding yields no frame.
+        """
+        path = self._validate_input(video_path)
+        if timestamp < 0:
+            raise FFmpegServiceError("timestamp must be >= 0.")
+
+        try:
+            probe = ffmpeg.probe(str(path))
+        except ffmpeg.Error as exc:
+            message = self._decode_stderr(exc)
+            raise FFmpegServiceError(
+                f"Could not probe '{path}': {message}"
+            ) from exc
+        stream = self._first_video_stream(probe)
+        width = int(stream.get("width", 0))
+        height = int(stream.get("height", 0))
+        if width <= 0 or height <= 0:
+            raise FFmpegServiceError(
+                f"Invalid video dimensions for '{path}': {width}x{height}."
+            )
+
+        frame_bytes = width * height * 3
+        try:
+            raw, err = (
+                ffmpeg
+                .input(str(path), ss=timestamp)
+                .output(
+                    "pipe:",
+                    format="rawvideo",
+                    pix_fmt="bgr24",
+                    vframes=1,
+                )
+                .global_args("-nostdin", "-loglevel", "error")
+                .run(capture_stdout=True, capture_stderr=True)
+            )
+        except ffmpeg.Error as exc:
+            self._raise_run_error("extract_frame_at", exc)
+
+        if not raw or len(raw) < frame_bytes:
+            message = err.decode("utf-8", errors="replace").strip() if err else ""
+            raise FFmpegServiceError(
+                f"No frame decoded at t={timestamp}s from '{path}'. {message}"
+            )
+        return (
+            np.frombuffer(raw[:frame_bytes], dtype=np.uint8)
+            .reshape((height, width, 3))
+        )
+
     def extract_frames(
         self,
         video_path: str | Path,

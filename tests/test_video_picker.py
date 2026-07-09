@@ -37,10 +37,11 @@ def test_all_known_extensions_are_recognized(tmp_path: Path) -> None:
     assert len(VideoPicker.filter_videos(made)) == len(VIDEO_EXTENSIONS)
 
 
-def test_list_videos_missing_dir_returns_empty(tmp_path, monkeypatch) -> None:
-    from config import config as app_config
+def test_list_videos_missing_dir_returns_empty(tmp_path) -> None:
+    from config import AppConfig, PathConfig
 
-    monkeypatch.setattr(
-        type(app_config.paths), "base_dir", tmp_path / "nope", raising=False
-    )
+    # Inject an isolated config rather than mutating the shared PathConfig
+    # class: the latter redirects the global logger's file handler into
+    # tmp_path and can leave an open handle, breaking tmp cleanup on Windows.
+    app_config = AppConfig(paths=PathConfig(base_dir=tmp_path / "nope"))
     assert VideoPicker(app_config).list_videos() == []
