@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 import cv2
 import numpy as np
@@ -259,7 +259,24 @@ class VideoAnalyzer:
             logger.error("Scene detection failed: %s", exc)
             raise VideoAnalyzerError(f"Scene detection failed: {exc}") from exc
 
-        return [(s.get_seconds(), e.get_seconds()) for s, e in scene_list]
+        return [
+            (self._to_seconds(start), self._to_seconds(end))
+            for start, end in scene_list
+        ]
+
+    @staticmethod
+    def _to_seconds(timecode: Any) -> float:
+        """Convert a PySceneDetect FrameTimecode to seconds.
+
+        Uses ``float(timecode)`` (the supported API) instead of the
+        deprecated ``FrameTimecode.get_seconds()``. Falls back to
+        ``get_seconds()`` only if float conversion is unavailable, so the
+        analyzer works across PySceneDetect versions.
+        """
+        try:
+            return float(timecode)
+        except (TypeError, ValueError):  # pragma: no cover - version fallback
+            return float(timecode.get_seconds())
 
     # ------------------------------------------------------------------ #
     # Frame sampling (OpenCV, frame differencing)
@@ -300,6 +317,10 @@ class VideoAnalyzer:
                 timestamp = round(frame_idx / fps, 3)
                 samples.append(self._build_metrics(timestamp, prev_gray, gray))
                 prev_gray = gray
+
+                # Light progress signal for long (1-3h) videos.
+                if len(samples) % 1000 == 0:
+                    logger.debug("Analyzed %d samples (t=%.1fs)", len(samples), timestamp)
 
             frame_idx += 1
 
@@ -354,6 +375,11 @@ class VideoAnalyzer:
         """
         if prev_gray is None:
             return 0.0
+        # Frame dimensions can change mid-stream (e.g. concatenated clips or
+        # some capture cards). absdiff would raise on a shape mismatch, so
+        # skip motion for that transition rather than aborting the analysis.
+        if prev_gray.shape != gray.shape:
+            return 0.0
         diff = cv2.absdiff(prev_gray, gray)
         return float(np.mean(diff))
 
@@ -381,13 +407,26 @@ class VideoAnalyzer:
         """Aggregate per-frame metrics into per-scene summaries.
 
         If PySceneDetect returns no scenes (e.g. a single continuous shot),
-        the whole video is treated as one scene.
+        the whole video is treated as one scene. Uses a single ordered pass
+        over the samples (both scenes and samples are time-sorted) so cost is
+        O(scenes + samples) rather than O(scenes * samples); this matters for
+        long 1-3h videos with many scene cuts.
         """
         spans = scene_spans or [(0.0, duration)]
-        scenes: list[SceneMetrics] = []
+        buckets: list[list[FrameMetrics]] = [[] for _ in spans]
 
-        for index, (start, end) in enumerate(spans):
-            in_scene = [s for s in samples if start <= s.timestamp < end]
+        sample_idx = 0
+        n_samples = len(samples)
+        for span_idx, (start, end) in enumerate(spans):
+            # Skip samples that fall before this scene's start (e.g. gaps).
+            while sample_idx < n_samples and samples[sample_idx].timestamp < start:
+                sample_idx += 1
+            while sample_idx < n_samples and samples[sample_idx].timestamp < end:
+                buckets[span_idx].append(samples[sample_idx])
+                sample_idx += 1
+
+        scenes: list[SceneMetrics] = []
+        for index, ((start, end), in_scene) in enumerate(zip(spans, buckets)):
             motions = [s.motion_score for s in in_scene]
             brights = [s.brightness for s in in_scene]
             statics = [s.static_score for s in in_scene]
@@ -410,7 +449,7 @@ class VideoAnalyzer:
         self,
         samples: list[FrameMetrics],
         duration: float,
-        flag,
+        flag: Callable[[FrameMetrics], bool],
         min_seconds: float,
     ) -> list[TimeSpan]:
         """Merge contiguous flagged samples into spans of a minimum length.

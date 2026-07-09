@@ -92,6 +92,7 @@ class VideoPicker:
             logger.debug("Tkinter unavailable, using CLI fallback: %s", exc)
             return None
 
+        root = None
         try:
             root = tk.Tk()
             root.withdraw()
@@ -101,10 +102,15 @@ class VideoPicker:
                 initialdir=str(self._config.paths.videos_dir),
                 filetypes=[("Video files", patterns), ("All files", "*.*")],
             )
-            root.destroy()
         except Exception as exc:  # noqa: BLE001 - no display, etc.
             logger.debug("File dialog failed, using CLI fallback: %s", exc)
             return None
+        finally:
+            if root is not None:
+                try:
+                    root.destroy()
+                except Exception:  # noqa: BLE001 - already torn down
+                    pass
 
         return selected or None
 

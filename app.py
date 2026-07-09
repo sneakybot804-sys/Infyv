@@ -10,6 +10,7 @@ import sys
 
 from agent import GamingEditorAgent, OllamaConnectionError
 from config import config
+from highlight_scorer import HighlightScorer, HighlightScorerError
 from logger import get_logger
 from video_analyzer import VideoAnalyzer, VideoAnalyzerError
 from video_picker import VideoPicker, VideoPickerError
@@ -88,6 +89,35 @@ def run_analysis() -> int:
     return 0
 
 
+def run_scoring() -> int:
+    """Run the Phase 5A highlight-scoring flow over an analysis.json."""
+    print("=" * 60)
+    print("  Local AI Gaming Video Editor - Highlight Scoring (Phase 5A)")
+    print("=" * 60)
+
+    try:
+        analysis_path = input(
+            "Path to an analysis.json (blank to cancel) > "
+        ).strip()
+    except (KeyboardInterrupt, EOFError):
+        print("\nCancelled.")
+        return 130
+
+    if not analysis_path:
+        print("No analysis file provided.")
+        return 1
+
+    try:
+        output = HighlightScorer(config).score_to_file(analysis_path)
+    except HighlightScorerError as exc:
+        logger.error("Scoring error: %s", exc)
+        print(f"\nScoring failed: {exc}")
+        return 2
+
+    print(f"\nHighlights written to: {output}")
+    return 0
+
+
 def choose_action() -> str:
     """Prompt the user to pick a top-level action."""
     print("=" * 60)
@@ -95,6 +125,7 @@ def choose_action() -> str:
     print("=" * 60)
     print("  1. Generate edit plan (Ollama)")
     print("  2. Analyze video (Phase 4A, generic)")
+    print("  3. Score highlights (Phase 5A)")
     print("  q. Quit")
     return input("Choose an option > ").strip().lower()
 
@@ -113,6 +144,8 @@ def run() -> int:
         return run_edit_plan()
     if choice in {"2", "analyze", "analysis"}:
         return run_analysis()
+    if choice in {"3", "score", "highlights"}:
+        return run_scoring()
     if choice in {"q", "quit", "exit"}:
         return 0
 

@@ -125,6 +125,14 @@ Target hardware: **Ryzen 7 5700G, 16 GB RAM, CPU-only.**
   analyzed, independent of source FPS.
 - **Single pass, streaming.** Frames are read and released one at a time; peak
   memory stays low regardless of video length.
+- **Single-pass scene aggregation.** Per-scene metrics are bucketed in one
+  ordered pass over the samples (O(scenes + samples)), so many scene cuts in a
+  long video do not cause quadratic cost.
+- **Decode cost caveat.** `VideoCapture.read()` decodes every frame even though
+  only ~`sample_fps` frames per second are analyzed. Decoding therefore
+  dominates runtime on long (1-3h) high-FPS sources; this is a deliberate
+  trade-off (sequential decode is more reliable than per-frame seeking).
+  Analysis itself stays cheap via downscaling + frame differencing.
 
 All thresholds are in `GenericAnalysisConfig`, so accuracy/speed can be tuned
 without code changes.

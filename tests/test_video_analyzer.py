@@ -79,6 +79,13 @@ def test_compute_static_score_is_inverse_of_motion() -> None:
     assert 0.0 < high < low_motion < 1.0
 
 
+def test_compute_motion_shape_mismatch_returns_zero() -> None:
+    small = np.full((10, 10), 100, dtype=np.uint8)
+    big = np.full((20, 20), 200, dtype=np.uint8)
+    # Differing shapes must not raise; motion is skipped for that transition.
+    assert VideoAnalyzer.compute_motion(small, big) == 0.0
+
+
 # --------------------------------------------------------------------- #
 # Full pipeline against synthetic videos
 # --------------------------------------------------------------------- #

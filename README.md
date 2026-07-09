@@ -1,5 +1,24 @@
 # aviveera795-project
 
+## Phase 5A - Highlight Scoring
+
+After analyzing a video (Phase 4A) you can score its scenes into a ranked
+highlight report. The scorer is generic and game-agnostic: it uses only the
+signals in `analysis.json` (motion, brightness, static score, duration, idle
+and black-screen overlap). It does not use Ollama, FFmpeg, audio or OCR.
+
+```bash
+python app.py    # choose option 3, then provide the analysis.json path
+```
+
+Output: `output/<video_name>_highlight.json` (schema `5a.1`, never
+overwritten). Each scene gets a 0-100 `score`, a `rank`, a `classification`
+(Excellent / Good / Average / Ignore) and a `components` breakdown.
+
+Scoring is fully configurable via `HighlightScoringConfig`. See `SCORING.md`
+for the formula, weighting and thresholds, and `JSON_SCHEMA.md` for the
+output schema.
+
 
 
 ## Getting started
