@@ -264,6 +264,63 @@ Notes:
 - Segments may be padded (`pre_roll_seconds` / `post_roll_seconds`) and
   merged when adjacent (`merge_gap_seconds`), then re-numbered.
 
+## subtitles.json (Phase 7) — `schema_version: "7.1"`
+
+Produced by `SubtitleEngine`. An independent producer that extracts audio from
+the ORIGINAL source video, transcribes it via a pluggable backend, and writes
+deterministic cues. Written to `output/<video_name>_subtitles.json` (never
+overwritten), with an optional `output/<video_name>.srt` sidecar. No other
+artifact is consumed or modified.
+
+The default `placeholder` backend returns an empty transcript, so the default
+output has `cues: []`. No transcription library is a project dependency; a
+real ASR backend can be registered later behind the same Protocol without a
+schema or API change.
+
+```json
+{
+  "schema_version": "7.1",
+  "video": "C:/path/to/videos/clip.mp4",
+  "language": "en",
+  "backend": "placeholder",
+  "cues": [
+    {
+      "id": "cue-0001",
+      "start": 3.20,
+      "end": 5.05,
+      "text": "first line\nsecond line",
+      "words": [
+        { "text": "first", "start": 3.20, "end": 3.44, "confidence": 0.99 }
+      ]
+    }
+  ]
+}
+```
+
+### Field reference
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `schema_version` | string | Schema identifier (`7.1`). |
+| `video` | string | Absolute path to the transcribed source video. |
+| `language` | string\|null | Detected/-configured language, or null. |
+| `backend` | string | Transcript backend that produced the cues. |
+| `cues[].id` | string | Stable cue id (`cue-NNNN`). |
+| `cues[].start/end` | float (s) | Cue timing (clamped to min/max cue duration). |
+| `cues[].text` | string | Cue text; may contain `\n` for wrapped lines. |
+| `cues[].words` | list | Per-word timings (empty when `word_timestamps` is off). |
+| `cues[].words[].text` | string | Word text. |
+| `cues[].words[].start/end` | float (s) | Word timing. |
+| `cues[].words[].confidence` | float 0..1 | Backend confidence. |
+
+Notes:
+- **Deterministic.** Cue grouping (gap merge), duration clamping, line
+  wrapping (`max_line_chars` x `max_lines_per_cue`) and ids are all a pure
+  function of the transcript and `SubtitleConfig`.
+- **SRT sidecar** uses standard `HH:MM:SS,mmm --> HH:MM:SS,mmm` timing and is
+  empty when there are no cues. Styling, burn-in, emoji and karaoke effects
+  are out of scope for Phase 7.
+
 ## Versioning policy
 
 - `schema_version` is mandatory in every artifact.

@@ -21,6 +21,8 @@ from ocr_config import OcrError
 from decision_agent import DecisionAgent
 from decision_config import DecisionError
 from editor_config import EditorError
+from subtitle_config import SubtitleError
+from subtitle_engine import SubtitleEngine
 from signal_fusion import SignalFusionEngine
 from signal_fusion_config import FusionError
 from video_analyzer import VideoAnalyzer, VideoAnalyzerError
@@ -322,6 +324,38 @@ def run_render() -> int:
     return 0
 
 
+def run_subtitles() -> int:
+    """Run the Phase 7 subtitle flow over the original source video.
+
+    Picks a video, extracts its audio, transcribes it via the configured
+    backend (the default placeholder yields no cues), and writes
+    ``output/<video>_subtitles.json`` and/or ``output/<video>.srt``.
+    """
+    print("=" * 60)
+    print("  Local AI Gaming Video Editor - Subtitles (Phase 7)")
+    print("=" * 60)
+
+    try:
+        video_path = VideoPicker(config).pick()
+    except (KeyboardInterrupt, EOFError):
+        print("\nCancelled.")
+        return 130
+    except VideoPickerError as exc:
+        print(f"No video selected: {exc}")
+        return 1
+
+    try:
+        outputs = SubtitleEngine(config).transcribe_to_file(video_path)
+    except SubtitleError as exc:
+        logger.error("Subtitle error: %s", exc)
+        print(f"\nSubtitle generation failed: {exc}")
+        return 2
+
+    for path in outputs:
+        print(f"Subtitle artifact written to: {path}")
+    return 0
+
+
 def choose_action() -> str:
     """Prompt the user to pick a top-level action."""
     print("=" * 60)
@@ -335,6 +369,7 @@ def choose_action() -> str:
     print("  6. Fuse signals (Phase 5D)")
     print("  7. Generate edit plan from highlights (Phase 5E)")
     print("  8. Render highlight reel (Phase 6)")
+    print("  9. Generate subtitles (Phase 7)")
     print("  q. Quit")
     return input("Choose an option > ").strip().lower()
 
@@ -365,6 +400,8 @@ def run() -> int:
         return run_decision()
     if choice in {"8", "render", "reel", "edit"}:
         return run_render()
+    if choice in {"9", "subtitles", "subs", "captions"}:
+        return run_subtitles()
     if choice in {"q", "quit", "exit"}:
         return 0
 
