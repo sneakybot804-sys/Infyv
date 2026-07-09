@@ -1,14 +1,18 @@
 """Entry point for the Local AI Gaming Video Editor.
 
 Phase 1 added the interactive edit-plan generator. Phase 4A adds a generic
-video-analysis flow. The two are exposed through a small top-level menu; the
-original edit-plan behaviour is unchanged.
+video-analysis flow, Phase 5A highlight scoring, and Phase 5C audio analysis.
+All are exposed through a small top-level menu; the original edit-plan
+behaviour is unchanged.
 """
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 from agent import GamingEditorAgent, OllamaConnectionError
+from audio_analyzer import AudioAnalyzer
+from audio_config import AudioAnalyzerError
 from config import config
 from highlight_scorer import HighlightScorer, HighlightScorerError
 from logger import get_logger
@@ -118,6 +122,49 @@ def run_scoring() -> int:
     return 0
 
 
+def run_audio_analysis() -> int:
+    """Run the Phase 5C audio-analysis flow over a selected video.
+
+    Picks a video with the existing picker, automatically uses the matching
+    ``output/<video>_analysis.json`` when it exists (the analyzer treats it
+    as an optional scene prior), and writes ``output/<video>_audio.json``.
+    """
+    print("=" * 60)
+    print("  Local AI Gaming Video Editor - Audio Analysis (Phase 5C)")
+    print("=" * 60)
+
+    try:
+        video_path = VideoPicker(config).pick()
+    except (KeyboardInterrupt, EOFError):
+        print("\nCancelled.")
+        return 130
+    except VideoPickerError as exc:
+        print(f"No video selected: {exc}")
+        return 1
+
+    # Auto-detect the matching Phase 4A analysis.json, if present.
+    analysis_candidate = (
+        config.paths.output_dir / f"{Path(video_path).stem}_analysis.json"
+    )
+    analysis_path = analysis_candidate if analysis_candidate.is_file() else None
+    if analysis_path is not None:
+        print(f"Using analysis for scene mapping: {analysis_path}")
+    else:
+        print("No matching analysis.json found; scene_index will be null.")
+
+    try:
+        output = AudioAnalyzer(config).analyze_to_file(
+            video_path, analysis_path=analysis_path
+        )
+    except AudioAnalyzerError as exc:
+        logger.error("Audio analysis error: %s", exc)
+        print(f"\nAudio analysis failed: {exc}")
+        return 2
+
+    print(f"\nAudio analysis written to: {output}")
+    return 0
+
+
 def choose_action() -> str:
     """Prompt the user to pick a top-level action."""
     print("=" * 60)
@@ -126,6 +173,7 @@ def choose_action() -> str:
     print("  1. Generate edit plan (Ollama)")
     print("  2. Analyze video (Phase 4A, generic)")
     print("  3. Score highlights (Phase 5A)")
+    print("  4. Analyze audio (Phase 5C)")
     print("  q. Quit")
     return input("Choose an option > ").strip().lower()
 
@@ -146,6 +194,8 @@ def run() -> int:
         return run_analysis()
     if choice in {"3", "score", "highlights"}:
         return run_scoring()
+    if choice in {"4", "audio"}:
+        return run_audio_analysis()
     if choice in {"q", "quit", "exit"}:
         return 0
 
