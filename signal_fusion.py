@@ -151,11 +151,18 @@ class SignalFusionEngine:
         ocr_by_scene = self._aggregate_ocr(ocr)
         audio_by_scene = self._aggregate_audio(audio)
 
+        # Availability is per source artifact (present vs absent), decided
+        # once. An absent artifact drops its weight from normalization; a
+        # present artifact keeps its weight even when a scene's value is a
+        # genuine 0. The base highlight signal is always present (required).
+        ocr_available = ocr is not None
+        audio_available = audio is not None
+
         fused: list[EnrichedScene] = []
         for scene in base_scenes:
             index = int(scene.get("index", 0))
             signals = self._scene_signals(scene, ocr_by_scene.get(index), audio_by_scene.get(index))
-            score_100 = self._fuse_score(signals)
+            score_100 = self._fuse_score(signals, ocr_available, audio_available)
             fused.append(
                 EnrichedScene(
                     index=index,
@@ -324,22 +331,37 @@ class SignalFusionEngine:
             voice_excitement=round(voice, 6),
         )
 
-    def _fuse_score(self, signals: SceneSignals) -> float:
-        """Weighted mean of the 0..1 sub-scores, scaled to the output range."""
+    def _fuse_score(
+        self,
+        signals: SceneSignals,
+        ocr_available: bool,
+        audio_available: bool,
+    ) -> float:
+        """Weighted mean of the 0..1 sub-scores over the AVAILABLE signals.
+
+        Only signals whose source artifact is present participate in the
+        normalization: an absent OCR/audio artifact contributes neither value
+        nor weight, so a missing signal never penalizes the fused score. The
+        base highlight signal is always present. ``audio_available`` governs
+        both audio_energy and voice_excitement (both derive from audio.json).
+        """
         cfg = self._fusion
-        weighted = (
-            cfg.base_highlight_weight * signals.base_highlight
-            + cfg.ocr_weight * signals.ocr
-            + cfg.audio_energy_weight * signals.audio_energy
-            + cfg.voice_excitement_weight * signals.voice_excitement
+        # (sub_score, weight, available) per signal.
+        contributions = [
+            (signals.base_highlight, cfg.base_highlight_weight, True),
+            (signals.ocr, cfg.ocr_weight, ocr_available),
+            (signals.audio_energy, cfg.audio_energy_weight, audio_available),
+            (signals.voice_excitement, cfg.voice_excitement_weight, audio_available),
+        ]
+        weighted = sum(
+            weight * value for value, weight, available in contributions if available
         )
-        total_weight = (
-            cfg.base_highlight_weight
-            + cfg.ocr_weight
-            + cfg.audio_energy_weight
-            + cfg.voice_excitement_weight
+        total_weight = sum(
+            weight for _value, weight, available in contributions if available
         )
-        # total_weight > 0 is guaranteed by FusionConfig.validate().
+        if total_weight <= 0.0:
+            # No available signal carries positive weight; nothing to fuse.
+            return 0.0
         fused01 = self._clamp01(weighted / total_weight)
         return fused01 * cfg.output_score_scale
 
