@@ -56,7 +56,6 @@ class Checkbox(ThemedWidget):
         self._checkbox = QCheckBox(text, self)
         self._checkbox.setObjectName("Checkbox")
         self._checkbox.setChecked(checked)
-        self._checkbox.setCursor = None  # guard against accidental attr use
         self._checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
         self._checkbox.toggled.connect(self._on_toggled)
 
