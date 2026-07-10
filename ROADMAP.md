@@ -32,9 +32,12 @@ application layer. Backend stays frozen. See `PHASE8_DESIGN.md`.
   typography/spacing/radius scales, SVG icon infrastructure, DPI support, and
   a single-authority ThemeManager with a dark-only switching seam (this step).
 - **8C — Widget library.** Built in verified sub-steps: 8C-1 infrastructure
-  (base/styling/animation/effects), 8C-2 primitives (GlassCard, NeonButton,
-  IconButton, SectionHeader), 8C-3..8C-6 information/progress/interactive/
-  advanced widgets. See `PHASE8C_DESIGN.md`.
+  (base/styling/animation/effects) [verified, frozen], 8C-2 primitives
+  (GlassCard, NeonButton, IconButton, SectionHeader) [verified, frozen],
+  8C-3 information/progress widgets (StatusBadge, MetaLabel, ProgressBar,
+  StatBlock) [verified, frozen], 8C-4 interactive widgets (ToggleSwitch,
+  Checkbox, TextField) [verified, frozen]; 8C-5..8C-6 advanced widgets are
+  next. See `PHASE8C_DESIGN.md`, `PHASE8C3_DESIGN.md`, `PHASE8C4_DESIGN.md`.
 - **8D-8I — GUI.** Main window, dashboard, pipeline view, remaining pages,
   animations/polish, optimization.
 

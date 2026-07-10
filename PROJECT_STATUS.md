@@ -23,11 +23,13 @@ Phase 8 (the premium desktop GUI) has started with Phase 8A, the Qt-free
 | 5E | AI decision pipeline (`edit_plan.json`, 5e.1) | Done |
 | 6 | Automatic video rendering (rendered MP4) | Done |
 | 7 | Subtitle engine (`subtitles.json` 7.1 + `.srt`) | Done |
-| 8A | Qt-free `gui_core` application layer | Done (verified: 219 passed) |
-| 8B | Theme foundation (tokens, dark theme, ThemeManager) | Done (verified) |
-| 8C-1 | Widget infrastructure (base, styling, animation, effects) | Done (verified) |
-| 8C-2 | Primitive widgets (GlassCard, NeonButton, IconButton, SectionHeader) | In progress (widgets + verified component-gallery preview) |
-| 8C-3..8C-6 / 8D-8I | Remaining widgets, pages, polish | Not started |
+| 8A | Qt-free `gui_core` application layer | Done (verified, frozen) |
+| 8B | Theme foundation (tokens, dark theme, ThemeManager) | Done (verified, frozen) |
+| 8C-1 | Widget infrastructure (base, styling, animation, effects) | Done (verified, frozen) |
+| 8C-2 | Primitive widgets (GlassCard, NeonButton, IconButton, SectionHeader) | Done (verified, frozen) |
+| 8C-3 | Information/progress widgets (StatusBadge, MetaLabel, ProgressBar, StatBlock) | Implemented, verified, frozen |
+| 8C-4 | Interactive widgets (ToggleSwitch, Checkbox, TextField) | Implemented, verified, frozen |
+| 8C-5..8C-6 / 8D-8I | Remaining widgets, pages, polish | Not started |
 
 ## Pipeline
 
@@ -45,9 +47,12 @@ Video
 
 ## Test status
 
-**173 passed, 1 skipped** on `main`. Phase 8A adds further Qt-free unit tests
-for `gui_core` (fakes only; no PySide6/FFmpeg/Ollama/network). Existing tests
-are unchanged.
+Test counts are treated as a per-run verification artifact, not a recorded
+architecture property, so exact pass totals are not pinned here. The suite is
+run with `pytest` and is green as of the latest verification. GUI widget tests
+are offscreen (`QT_QPA_PLATFORM=offscreen`, `importorskip PySide6`) and
+behaviour-only; `gui_core` tests use fakes only (no PySide6/FFmpeg/Ollama/
+network).
 
 ## Architecture rules (enforced)
 
