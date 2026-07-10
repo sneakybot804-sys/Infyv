@@ -14,6 +14,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
 from gui.theme.manager import ThemeManager  # noqa: E402
+from gui.theme.colorutils import parse_color  # noqa: E402
+from gui.theme.motion import easing_curve  # noqa: E402
 from gui.widgets import styling  # noqa: E402
 from gui.widgets.animation import fade, tween_value  # noqa: E402
 from gui.widgets.base import ThemedWidget  # noqa: E402
@@ -65,37 +67,65 @@ def test_scaled_and_icon_helpers(app: QApplication) -> None:
 def test_styling_builders_use_tokens(app: QApplication) -> None:
     theme = ThemeManager()
     tokens = theme.tokens
-    glass = styling.glass_card_qss(tokens)
-    assert tokens.colors.glass_fill in glass
-    surface = styling.surface_card_qss(tokens)
-    assert tokens.colors.surface_elevated in surface
-    assert styling.accent_color(tokens, "cyan") == tokens.colors.accent_cyan
-    assert styling.accent_glow(tokens, "purple") == tokens.colors.accent_purple_glow
+    colors = tokens.colors
+    glass = styling.glass_card_qss(colors, radius=tokens.radius.lg)
+    assert colors.glass_fill in glass
+    surface = styling.surface_card_qss(colors, radius=tokens.radius.lg)
+    assert colors.surface_elevated in surface
+    assert styling.accent_color(colors, "cyan") == colors.accent_cyan
+    assert styling.accent_glow(colors, "purple") == colors.accent_purple_glow
 
 
 def test_fade_not_animated_sets_final_state(app: QApplication) -> None:
     theme = ThemeManager()
+    motion = theme.tokens.motion
     widget = QWidget()
-    result = fade(widget, 0.0, 1.0, theme.tokens.motion, animated=False)
+    result = fade(
+        widget,
+        0.0,
+        1.0,
+        duration_ms=motion.duration_normal_ms,
+        easing=easing_curve(motion.easing_standard),
+        animated=False,
+    )
     assert result is None  # reduce-motion path returns no animation
 
 
 def test_tween_value_not_animated_calls_once(app: QApplication) -> None:
     theme = ThemeManager()
+    motion = theme.tokens.motion
     seen: list[float] = []
-    result = tween_value(0.0, 1.0, theme.tokens.motion, seen.append, animated=False)
+    result = tween_value(
+        0.0,
+        1.0,
+        seen.append,
+        duration_ms=motion.duration_normal_ms,
+        easing=easing_curve(motion.easing_standard),
+        animated=False,
+    )
     assert result is None
     assert seen == [1.0]
 
 
 def test_effects_apply_and_clear(app: QApplication) -> None:
     theme = ThemeManager()
+    shadows = theme.tokens.shadows
     widget = QWidget()
-    apply_shadow(widget, theme.tokens.shadows.medium)
+    apply_shadow(
+        widget,
+        blur=shadows.medium.blur,
+        x=shadows.medium.x,
+        y=shadows.medium.y,
+        color=parse_color(shadows.medium.color),
+    )
     assert widget.graphicsEffect() is not None
     clear_effect(widget)
     assert widget.graphicsEffect() is None
-    apply_glow(widget, theme.tokens.shadows.glow_cyan)
+    apply_glow(
+        widget,
+        blur=shadows.glow_cyan.blur,
+        color=parse_color(shadows.glow_cyan.color),
+    )
     assert widget.graphicsEffect() is not None
 
 

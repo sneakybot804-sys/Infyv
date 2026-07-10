@@ -1,53 +1,62 @@
-"""Optional visual effects (shadow, glow, blur) built from tokens.
+"""Optional visual effects: thin wrappers over Qt graphics effects.
 
-Effects are configurable and removable. Colors and radii come only from the
-active theme's shadow/blur tokens. These wrap Qt graphics effects; a widget
-can install or clear them at will. Note Qt allows a single graphics effect per
-widget, so glow and shadow are mutually exclusive on the same widget (compose
-with a container if both are needed).
+These functions only wrap Qt graphics effects; they make no styling or token
+decisions and import no token modules. Callers (widgets holding the injected
+:class:`ThemeManager`) resolve concrete values from the active tokens -- blur
+radius/offset scalars and a :class:`QColor` -- and pass them in.
+
+Note Qt allows a single graphics effect per widget, so glow and shadow are
+mutually exclusive on the same widget (compose with a container if both are
+needed).
 """
 from __future__ import annotations
 
-from typing import Optional
-
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QGraphicsBlurEffect, QGraphicsDropShadowEffect, QWidget
 
-from gui.theme.colorutils import parse_color
-from gui.theme.tokens import BlurTokens, ShadowToken
 
+def apply_shadow(
+    widget: QWidget,
+    *,
+    blur: float,
+    x: float,
+    y: float,
+    color: QColor,
+) -> QGraphicsDropShadowEffect:
+    """Install a drop-shadow effect on ``widget`` from concrete values.
 
-def apply_shadow(widget: QWidget, shadow: ShadowToken) -> QGraphicsDropShadowEffect:
-    """Install a drop-shadow effect on ``widget`` from a shadow token.
+    Args:
+        widget: Target widget.
+        blur: Blur radius in pixels.
+        x: Horizontal offset in pixels.
+        y: Vertical offset in pixels.
+        color: Shadow color (already resolved from a token by the caller).
 
-    Returns the created effect so callers can tweak or remove it later.
+    Returns:
+        The created effect, so callers can tweak or remove it later.
     """
     effect = QGraphicsDropShadowEffect(widget)
-    effect.setBlurRadius(float(shadow.blur))
-    effect.setOffset(float(shadow.x), float(shadow.y))
-    effect.setColor(parse_color(shadow.color))
+    effect.setBlurRadius(float(blur))
+    effect.setOffset(float(x), float(y))
+    effect.setColor(color)
     widget.setGraphicsEffect(effect)
     return effect
 
 
-def apply_glow(widget: QWidget, glow: ShadowToken) -> QGraphicsDropShadowEffect:
-    """Install a neon glow (a zero-offset colored drop shadow) on ``widget``.
+def apply_glow(
+    widget: QWidget,
+    *,
+    blur: float,
+    color: QColor,
+) -> QGraphicsDropShadowEffect:
+    """Install a neon glow (a zero-offset colored drop shadow) on ``widget``."""
+    return apply_shadow(widget, blur=blur, x=0.0, y=0.0, color=color)
 
-    A glow token is a :class:`ShadowToken` with zero offset and an accent
-    color; this is a thin, intention-revealing wrapper over ``apply_shadow``.
-    """
-    return apply_shadow(widget, glow)
 
-
-def apply_blur(widget: QWidget, blur: BlurTokens, *, radius: Optional[int] = None) -> QGraphicsBlurEffect:
-    """Install a blur effect on ``widget`` using a blur token radius.
-
-    Args:
-        widget: Target widget.
-        blur: Blur tokens supplying the default panel radius.
-        radius: Optional explicit blur radius override (pixels).
-    """
+def apply_blur(widget: QWidget, radius: float) -> QGraphicsBlurEffect:
+    """Install a blur effect on ``widget`` with the given ``radius`` (px)."""
     effect = QGraphicsBlurEffect(widget)
-    effect.setBlurRadius(float(radius if radius is not None else blur.panel))
+    effect.setBlurRadius(float(radius))
     widget.setGraphicsEffect(effect)
     return effect
 

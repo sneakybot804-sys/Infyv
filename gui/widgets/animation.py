@@ -1,14 +1,15 @@
-"""Optional, token-driven animation helpers.
+"""Optional, reusable animation helpers (Qt-only, no token imports).
 
-All helpers are opt-in and seeded from the active theme's motion tokens
-(durations and easing). Every helper accepts ``animated``; when ``False`` it
-applies the final state instantly (no running animation), which is also the
-accessibility \"reduce motion\" path. Widgets should route timings/easing only
-through these helpers so no widget hardcodes animation values.
+These helpers are generic and widget-agnostic. They must not import token
+modules: callers (widgets, which hold the injected :class:`ThemeManager`)
+resolve concrete timing/easing from the active tokens and pass them in. Every
+helper accepts ``animated``; when ``False`` it applies the final state
+instantly (no running animation), which is also the accessibility \"reduce
+motion\" path.
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import Callable, Optional
 
 from PySide6.QtCore import (
     QAbstractAnimation,
@@ -18,18 +19,14 @@ from PySide6.QtCore import (
 )
 from PySide6.QtWidgets import QGraphicsOpacityEffect, QWidget
 
-from gui.theme.motion import easing_curve
-from gui.theme.tokens import MotionTokens
-
 
 def fade(
     widget: QWidget,
     start: float,
     end: float,
-    motion: MotionTokens,
     *,
-    duration_ms: Optional[int] = None,
-    easing_name: Optional[str] = None,
+    duration_ms: int,
+    easing: QEasingCurve,
     animated: bool = True,
 ) -> Optional[QPropertyAnimation]:
     """Fade ``widget`` opacity from ``start`` to ``end``.
@@ -38,9 +35,10 @@ def fade(
         widget: The widget to fade (a QGraphicsOpacityEffect is installed).
         start: Starting opacity (0..1).
         end: Ending opacity (0..1).
-        motion: Motion tokens supplying default duration/easing.
-        duration_ms: Optional explicit duration override.
-        easing_name: Optional explicit easing token name override.
+        duration_ms: Animation duration in milliseconds (from a motion token,
+            resolved by the caller).
+        easing: The easing curve to use (resolved by the caller from a motion
+            token via :mod:`gui.theme.motion`).
         animated: When ``False``, set the final opacity instantly and return
             ``None`` (reduce-motion path).
 
@@ -55,12 +53,10 @@ def fade(
         return None
 
     animation = QPropertyAnimation(effect, b"opacity", widget)
-    animation.setDuration(duration_ms if duration_ms is not None else motion.duration_normal_ms)
+    animation.setDuration(duration_ms)
     animation.setStartValue(start)
     animation.setEndValue(end)
-    animation.setEasingCurve(
-        easing_curve(easing_name) if easing_name else easing_curve(motion.easing_standard)
-    )
+    animation.setEasingCurve(easing)
     animation.start(QAbstractAnimation.DeletionPolicy.DeleteWhenStopped)
     return animation
 
@@ -68,11 +64,10 @@ def fade(
 def tween_value(
     start: float,
     end: float,
-    motion: MotionTokens,
-    on_value,
+    on_value: Callable[[float], None],
     *,
-    duration_ms: Optional[int] = None,
-    easing_name: Optional[str] = None,
+    duration_ms: int,
+    easing: QEasingCurve,
     animated: bool = True,
 ) -> Optional[QVariantAnimation]:
     """Tween a scalar from ``start`` to ``end``, calling ``on_value`` each step.
@@ -80,6 +75,14 @@ def tween_value(
     Useful for custom-painted widgets (e.g. a progress ring sweeping to a new
     value). When ``animated`` is ``False``, ``on_value(end)`` is called once
     and ``None`` is returned.
+
+    Args:
+        start: Starting scalar value.
+        end: Ending scalar value.
+        on_value: Callback invoked with each intermediate value.
+        duration_ms: Animation duration in milliseconds (caller-resolved).
+        easing: The easing curve to use (caller-resolved).
+        animated: When ``False``, call ``on_value(end)`` once and return None.
     """
     if not animated:
         on_value(end)
@@ -88,15 +91,8 @@ def tween_value(
     animation = QVariantAnimation()
     animation.setStartValue(float(start))
     animation.setEndValue(float(end))
-    animation.setDuration(duration_ms if duration_ms is not None else motion.duration_normal_ms)
-    animation.setEasingCurve(
-        easing_curve(easing_name) if easing_name else easing_curve(motion.easing_standard)
-    )
+    animation.setDuration(duration_ms)
+    animation.setEasingCurve(easing)
     animation.valueChanged.connect(lambda v: on_value(float(v)))
     animation.start(QAbstractAnimation.DeletionPolicy.DeleteWhenStopped)
     return animation
-
-
-def resolve_easing(motion: MotionTokens, name: Optional[str] = None) -> QEasingCurve:
-    """Return a :class:`QEasingCurve` for ``name`` or the standard easing."""
-    return easing_curve(name) if name else easing_curve(motion.easing_standard)
