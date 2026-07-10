@@ -9,12 +9,11 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QEvent, Qt, Signal
+from PySide6.QtCore import QEvent, QPropertyAnimation, Qt, Signal
 from PySide6.QtWidgets import QGraphicsOpacityEffect, QPushButton, QVBoxLayout, QWidget
 
 from gui.theme.manager import ThemeManager
 from gui.widgets import styling
-from gui.widgets.animation import fade_effect
 from gui.widgets.base import ThemedWidget
 
 _VARIANTS = ("primary", "secondary", "ghost")
@@ -64,12 +63,13 @@ class NeonButton(ThemedWidget):
         self._button.setCursor(Qt.CursorShape.PointingHandCursor)
         self._button.clicked.connect(self.clicked.emit)
 
-        # One persistent opacity effect animated between states (no abrupt
-        # jumps, no per-event effect churn).
+        # One persistent opacity effect AND one reused animation animated
+        # between states (no abrupt jumps, no per-event effect/animation
+        # allocation).
         self._opacity = QGraphicsOpacityEffect(self._button)
         self._opacity.setOpacity(1.0)
         self._button.setGraphicsEffect(self._opacity)
-        self._current_opacity = 1.0
+        self._opacity_anim = QPropertyAnimation(self._opacity, b"opacity", self)
         self._button.installEventFilter(self)
 
         layout = QVBoxLayout(self)
@@ -97,17 +97,21 @@ class NeonButton(ThemedWidget):
         return super().eventFilter(watched, event)
 
     def _animate_opacity(self, end: float) -> None:
-        """Smoothly animate the single opacity effect to ``end``."""
-        fade_effect(
-            self._opacity,
-            self._current_opacity,
-            end,
-            duration_ms=self._theme.duration("fast"),
-            easing=self._theme.easing(),
-            animated=self._animated,
-            owner=self,
-        )
-        self._current_opacity = end
+        """Smoothly animate the single, reused opacity animation to ``end``.
+
+        Any in-flight run is stopped and the same animation object is
+        re-targeted from the current opacity, so hover/press/release
+        transitions interrupt smoothly without allocating a new animation.
+        """
+        if not self._animated:
+            self._opacity.setOpacity(end)
+            return
+        self._opacity_anim.stop()
+        self._opacity_anim.setDuration(self._theme.duration("fast"))
+        self._opacity_anim.setStartValue(float(self._opacity.opacity()))
+        self._opacity_anim.setEndValue(float(end))
+        self._opacity_anim.setEasingCurve(self._theme.easing())
+        self._opacity_anim.start()
 
     # ------------------------------------------------------------------ #
     # Public API

@@ -9,13 +9,13 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QAbstractAnimation, QPropertyAnimation
+from PySide6.QtCore import QPropertyAnimation, QVariantAnimation
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QFrame, QGraphicsDropShadowEffect, QVBoxLayout, QWidget
 
 from gui.theme.manager import ThemeManager
 from gui.widgets import styling
-from gui.widgets.animation import fade, tween_value
+from gui.widgets.animation import fade
 from gui.widgets.base import ThemedWidget
 
 _SHADOW_BY_LEVEL = {
@@ -69,7 +69,13 @@ class GlassCard(ThemedWidget):
         self._effect = QGraphicsDropShadowEffect(self._frame)
         self._frame.setGraphicsEffect(self._effect)
         self._glow_active = False
-        self._blur_anim: Optional[QPropertyAnimation] = None
+
+        # Persistent, reused animations (created once; never recreated during
+        # hover). Rapid state changes stop() and re-target these objects.
+        self._blur_anim = QPropertyAnimation(self._effect, b"blurRadius", self)
+        self._alpha_anim = QVariantAnimation(self)
+        self._alpha_anim.valueChanged.connect(self._on_alpha_step)
+        self._alpha_base_color = QColor(0, 0, 0, 0)
 
         self.setAccessibleName("card")
         self.apply_theme()
@@ -149,12 +155,19 @@ class GlassCard(ThemedWidget):
         """Return the glow shadow token for the current glow role."""
         return getattr(self.tokens.shadows, f"glow_{self._glow_role}")
 
+    def _on_alpha_step(self, value: object) -> None:
+        """Apply an animated alpha step to the persistent effect color."""
+        c = QColor(self._alpha_base_color)
+        c.setAlpha(int(round(float(value))))
+        self._effect.setColor(c)
+
     def _transition_glow(self, to_glow: bool) -> None:
         """Smoothly fade the single effect between resting shadow and glow.
 
-        Animates blur radius (QPropertyAnimation on the effect) and color
-        alpha (tween updating the effect color). When animations are disabled
-        the end state is applied instantly.
+        Reuses the persistent blur and alpha animations: any in-flight run is
+        stopped and the same objects are re-targeted, so rapid hover changes
+        interrupt cleanly without allocating new effects or animations. When
+        animations are disabled the end state is applied instantly.
         """
         self._glow_active = to_glow
         if self._glow_role is None:
@@ -170,8 +183,13 @@ class GlassCard(ThemedWidget):
             if to_glow
             else self._theme.color(resting.color)
         )
+        self._alpha_base_color = base_color
         target_alpha = base_color.alpha()
         start_alpha = self._effect.color().alpha()
+
+        # Always stop in-flight runs first for clean interruption.
+        self._blur_anim.stop()
+        self._alpha_anim.stop()
 
         if not self._animated:
             self._effect.setBlurRadius(end_blur)
@@ -181,26 +199,17 @@ class GlassCard(ThemedWidget):
         duration = self._theme.duration("fast")
         easing = self._theme.easing()
 
-        self._blur_anim = QPropertyAnimation(self._effect, b"blurRadius", self)
         self._blur_anim.setDuration(duration)
         self._blur_anim.setStartValue(start_blur)
         self._blur_anim.setEndValue(end_blur)
         self._blur_anim.setEasingCurve(easing)
-        self._blur_anim.start(QAbstractAnimation.DeletionPolicy.DeleteWhenStopped)
+        self._blur_anim.start()
 
-        def _set_alpha(a: float) -> None:
-            c = QColor(base_color)
-            c.setAlpha(int(round(a)))
-            self._effect.setColor(c)
-
-        tween_value(
-            start_alpha,
-            target_alpha,
-            _set_alpha,
-            duration_ms=duration,
-            easing=easing,
-            animated=self._animated,
-        )
+        self._alpha_anim.setDuration(duration)
+        self._alpha_anim.setStartValue(float(start_alpha))
+        self._alpha_anim.setEndValue(float(target_alpha))
+        self._alpha_anim.setEasingCurve(easing)
+        self._alpha_anim.start()
 
     def enterEvent(self, event) -> None:  # noqa: N802 (Qt override)
         """Fade the neon glow in while hovered/active."""
