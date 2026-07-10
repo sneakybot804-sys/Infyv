@@ -25,7 +25,7 @@ def _labeled_card(theme, title, subtitle, badge, body_layout):
 
     Helper local to the gallery; not part of the widget library.
     """
-    from PySide6.QtWidgets import QVBoxLayout, QWidget
+    from PySide6.QtWidgets import QLayout, QVBoxLayout, QWidget
 
     from gui.widgets import GlassCard, SectionHeader
 
@@ -37,6 +37,10 @@ def _labeled_card(theme, title, subtitle, badge, body_layout):
         tokens.spacing.lg, tokens.spacing.lg, tokens.spacing.lg, tokens.spacing.lg
     )
     layout.setSpacing(tokens.spacing.md)
+    # Reserve at least the combined minimum height of the header and body so
+    # short body rows (e.g. fixed-width button rows) cannot vertically clip
+    # the two-line SectionHeader title/subtitle + divider.
+    layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
 
     header = SectionHeader(theme, title, subtitle=subtitle)
     if badge:
