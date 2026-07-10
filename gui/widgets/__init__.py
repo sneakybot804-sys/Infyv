@@ -19,8 +19,12 @@ from __future__ import annotations
 from gui.widgets.base import ThemedWidget
 from gui.widgets.glass_card import GlassCard
 from gui.widgets.icon_button import IconButton
+from gui.widgets.meta_label import MetaLabel
 from gui.widgets.neon_button import NeonButton
+from gui.widgets.progress_bar import ProgressBar
 from gui.widgets.section_header import SectionHeader
+from gui.widgets.stat_block import StatBlock
+from gui.widgets.status_badge import StatusBadge
 
 __all__ = [
     "ThemedWidget",
@@ -28,4 +32,8 @@ __all__ = [
     "NeonButton",
     "IconButton",
     "SectionHeader",
+    "StatusBadge",
+    "MetaLabel",
+    "ProgressBar",
+    "StatBlock",
 ]
