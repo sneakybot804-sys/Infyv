@@ -20,11 +20,17 @@ class ColorsLike(Protocol):
     avoids importing the concrete token module into the widget layer.
     """
 
+    surface: str
     surface_elevated: str
+    surface_overlay: str
     glass_fill: str
     glass_border: str
     border: str
+    divider: str
     focus_ring: str
+    text_primary: str
+    text_on_accent: str
+    text_disabled: str
     accent_blue: str
     accent_cyan: str
     accent_purple: str
@@ -113,3 +119,107 @@ def accent_glow(colors: ColorsLike, role: str) -> str:
         "error": colors.error_glow,
     }
     return mapping[role]
+
+
+def neon_button_qss(
+    colors: ColorsLike,
+    *,
+    radius: int,
+    pad_v: int,
+    pad_h: int,
+    accent: str,
+    variant: str,
+    selector: str,
+) -> str:
+    """Return QSS for a NeonButton's inner QPushButton.
+
+    Args:
+        colors: Duck-typed color tokens.
+        radius: Corner radius in pixels.
+        pad_v: Vertical padding in pixels.
+        pad_h: Horizontal padding in pixels.
+        accent: Accent role name (``blue``/``cyan``/``purple``).
+        variant: One of ``primary``, ``secondary``, ``ghost``.
+        selector: The Qt selector to scope the rules to.
+
+    Raises:
+        KeyError: If ``accent`` is not a known accent role.
+        ValueError: If ``variant`` is not recognized.
+    """
+    accent_c = accent_color(colors, accent)
+    if variant == "primary":
+        base_bg, base_fg, base_border = accent_c, colors.text_on_accent, accent_c
+        hover_bg = accent_c
+    elif variant == "secondary":
+        base_bg, base_fg, base_border = colors.surface_elevated, colors.text_primary, colors.border
+        hover_bg = colors.surface_overlay
+    elif variant == "ghost":
+        base_bg, base_fg, base_border = "transparent", colors.text_primary, "transparent"
+        hover_bg = colors.surface_elevated
+    else:  # pragma: no cover - guarded by the widget API
+        raise ValueError(f"Unknown NeonButton variant: {variant!r}")
+
+    return f"""
+{selector} {{
+    background-color: {base_bg};
+    color: {base_fg};
+    border: 1px solid {base_border};
+    border-radius: {radius}px;
+    padding: {pad_v}px {pad_h}px;
+}}
+{selector}:hover {{
+    background-color: {hover_bg};
+    border: 1px solid {accent_c};
+}}
+{selector}:pressed {{
+    background-color: {colors.surface_overlay};
+}}
+{selector}:focus {{
+    border: 1px solid {colors.focus_ring};
+}}
+{selector}:disabled {{
+    color: {colors.text_disabled};
+    border: 1px solid {colors.divider};
+    background-color: {colors.surface};
+}}
+""".strip()
+
+
+def icon_button_qss(
+    colors: ColorsLike,
+    *,
+    radius: int,
+    accent: str,
+    selector: str,
+) -> str:
+    """Return QSS for an IconButton's inner QToolButton.
+
+    Checked state uses the accent fill; hover raises the surface. The neon
+    focus ring is always applied for keyboard visibility.
+    """
+    accent_c = accent_color(colors, accent)
+    return f"""
+{selector} {{
+    background-color: {colors.surface_elevated};
+    border: 1px solid {colors.border};
+    border-radius: {radius}px;
+}}
+{selector}:hover {{
+    border: 1px solid {accent_c};
+    background-color: {colors.surface_overlay};
+}}
+{selector}:pressed {{
+    background-color: {colors.surface_overlay};
+}}
+{selector}:checked {{
+    background-color: {accent_c};
+    border: 1px solid {accent_c};
+}}
+{selector}:focus {{
+    border: 1px solid {colors.focus_ring};
+}}
+{selector}:disabled {{
+    border: 1px solid {colors.divider};
+    background-color: {colors.surface};
+}}
+""".strip()

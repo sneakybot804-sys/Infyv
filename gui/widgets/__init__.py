@@ -17,7 +17,15 @@ widgets available so far; 8C-1 ships infrastructure only (no widgets yet).
 from __future__ import annotations
 
 from gui.widgets.base import ThemedWidget
+from gui.widgets.glass_card import GlassCard
+from gui.widgets.icon_button import IconButton
+from gui.widgets.neon_button import NeonButton
+from gui.widgets.section_header import SectionHeader
 
 __all__ = [
     "ThemedWidget",
+    "GlassCard",
+    "NeonButton",
+    "IconButton",
+    "SectionHeader",
 ]
