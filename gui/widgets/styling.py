@@ -121,6 +121,38 @@ def accent_glow(colors: ColorsLike, role: str) -> str:
     return mapping[role]
 
 
+def label_color_qss(color: str, *, selector: str = "QLabel") -> str:
+    """Return QSS setting a label's text color."""
+    return f"{selector} {{ color: {color}; background: transparent; }}"
+
+
+def badge_qss(
+    colors: ColorsLike, *, radius: int, pad_v: int, pad_h: int, accent: str, selector: str
+) -> str:
+    """Return QSS for a small pill badge (accent fill, on-accent text)."""
+    accent_c = accent_color(colors, accent)
+    return f"""
+{selector} {{
+    background-color: {accent_c};
+    color: {colors.text_on_accent};
+    border-radius: {radius}px;
+    padding: {pad_v}px {pad_h}px;
+}}
+""".strip()
+
+
+def divider_qss(colors: ColorsLike, *, selector: str) -> str:
+    """Return QSS for a 1px horizontal divider line."""
+    return f"""
+{selector} {{
+    background-color: {colors.divider};
+    border: none;
+    max-height: 1px;
+    min-height: 1px;
+}}
+""".strip()
+
+
 def neon_button_qss(
     colors: ColorsLike,
     *,

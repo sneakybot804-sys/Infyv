@@ -9,11 +9,12 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QPushButton, QVBoxLayout, QWidget
+from PySide6.QtCore import QEvent, Qt, Signal
+from PySide6.QtWidgets import QGraphicsOpacityEffect, QPushButton, QVBoxLayout, QWidget
 
 from gui.theme.manager import ThemeManager
 from gui.widgets import styling
+from gui.widgets.animation import fade
 from gui.widgets.base import ThemedWidget
 
 _VARIANTS = ("primary", "secondary", "ghost")
@@ -62,6 +63,8 @@ class NeonButton(ThemedWidget):
         self._button.setObjectName("NeonButton")
         self._button.setCursor(Qt.CursorShape.PointingHandCursor)
         self._button.clicked.connect(self.clicked.emit)
+        # Hover/press opacity feedback (optional, reduce-motion aware).
+        self._button.installEventFilter(self)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -69,6 +72,34 @@ class NeonButton(ThemedWidget):
 
         self.setAccessibleName(text or "button")
         self.apply_theme()
+
+    # ------------------------------------------------------------------ #
+    # Hover / press animation
+    # ------------------------------------------------------------------ #
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802 (Qt override)
+        """Animate opacity on hover/press for smooth tactile feedback."""
+        if watched is self._button and self._animated:
+            kind = event.type()
+            if kind == QEvent.Type.Enter:
+                self._animate_opacity(1.0, 0.92)
+            elif kind == QEvent.Type.Leave:
+                self._animate_opacity(0.92, 1.0)
+            elif kind == QEvent.Type.MouseButtonPress:
+                self._animate_opacity(0.92, 0.78)
+            elif kind == QEvent.Type.MouseButtonRelease:
+                self._animate_opacity(0.78, 0.92)
+        return super().eventFilter(watched, event)
+
+    def _animate_opacity(self, start: float, end: float) -> None:
+        """Fade the inner button opacity using theme motion tokens."""
+        fade(
+            self._button,
+            start,
+            end,
+            duration_ms=self._theme.duration("fast"),
+            easing=self._theme.easing(),
+            animated=self._animated,
+        )
 
     # ------------------------------------------------------------------ #
     # Public API

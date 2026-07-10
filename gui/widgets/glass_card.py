@@ -104,7 +104,11 @@ class GlassCard(ThemedWidget):
     # Theming
     # ------------------------------------------------------------------ #
     def apply_theme(self) -> None:
-        """Rebuild the glass styling and shadow/glow from the theme."""
+        """Rebuild the glass styling and the resting elevation shadow.
+
+        The neon glow is applied only on hover/active (see the enter/leave
+        events); at rest the card shows its elevation shadow.
+        """
         tokens = self.tokens
         radius = self.scaled(getattr(tokens.radius, self._radius_key))
         self._frame.setStyleSheet(
@@ -112,22 +116,43 @@ class GlassCard(ThemedWidget):
                 tokens.colors, radius=radius, selector="#GlassCard"
             )
         )
-        if self._glow_role is not None:
-            glow = getattr(tokens.shadows, f"glow_{self._glow_role}")
-            effects.apply_glow(
-                self._frame,
-                blur=self.scaled(glow.blur),
-                color=self._theme.color(f"{self._glow_role}_glow"),
-            )
-        else:
-            shadow = getattr(tokens.shadows, _SHADOW_BY_LEVEL[self._elevation_level])
-            effects.apply_shadow(
-                self._frame,
-                blur=self.scaled(shadow.blur),
-                x=self.scaled(shadow.x),
-                y=self.scaled(shadow.y),
-                color=self._theme.color(shadow.color),
-            )
+        self._apply_resting_shadow()
+
+    def _apply_resting_shadow(self) -> None:
+        """Install the elevation drop shadow (the at-rest state)."""
+        shadow = getattr(self.tokens.shadows, _SHADOW_BY_LEVEL[self._elevation_level])
+        effects.apply_shadow(
+            self._frame,
+            blur=self.scaled(shadow.blur),
+            x=self.scaled(shadow.x),
+            y=self.scaled(shadow.y),
+            color=self._theme.color(shadow.color),
+        )
+
+    def _apply_hover_glow(self) -> None:
+        """Install the neon glow (the hover/active state).
+
+        Falls back to the resting shadow when no glow role is configured.
+        """
+        if self._glow_role is None:
+            self._apply_resting_shadow()
+            return
+        glow = getattr(self.tokens.shadows, f"glow_{self._glow_role}")
+        effects.apply_glow(
+            self._frame,
+            blur=self.scaled(glow.blur),
+            color=self._theme.color(f"{self._glow_role}_glow"),
+        )
+
+    def enterEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        """Show the neon glow while hovered/active."""
+        self._apply_hover_glow()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        """Return to the resting elevation shadow when the hover ends."""
+        self._apply_resting_shadow()
+        super().leaveEvent(event)
 
     # ------------------------------------------------------------------ #
     # Behaviour

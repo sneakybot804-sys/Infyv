@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtWidgets import QToolButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QMenu, QToolButton, QVBoxLayout, QWidget
 
 from gui.theme.manager import ThemeManager
 from gui.widgets import styling
@@ -99,6 +99,24 @@ class IconButton(ThemedWidget):
     def set_tooltip(self, tooltip: str) -> None:
         """Set the tooltip text."""
         self._button.setToolTip(tooltip)
+
+    def set_context_menu(self, menu: Optional[QMenu]) -> None:
+        """Attach (or clear with ``None``) a right-click context menu.
+
+        Future-friendly hook: menu content is the caller's responsibility;
+        the widget only wires the custom context-menu policy and display.
+        """
+        self._context_menu = menu
+        if menu is not None:
+            self._button.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            self._button.customContextMenuRequested.connect(self._show_context_menu)
+        else:
+            self._button.setContextMenuPolicy(Qt.ContextMenuPolicy.DefaultContextMenu)
+
+    def _show_context_menu(self, pos) -> None:
+        """Display the attached context menu at ``pos`` (button coordinates)."""
+        if getattr(self, "_context_menu", None) is not None:
+            self._context_menu.exec(self._button.mapToGlobal(pos))
 
     @property
     def accent(self) -> str:
