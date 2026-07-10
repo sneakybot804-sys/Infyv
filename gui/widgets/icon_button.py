@@ -118,6 +118,10 @@ class IconButton(ThemedWidget):
         if getattr(self, "_context_menu", None) is not None:
             self._context_menu.exec(self._button.mapToGlobal(pos))
 
+    def has_context_menu(self) -> bool:
+        """Return whether a context menu is currently attached."""
+        return getattr(self, "_context_menu", None) is not None
+
     @property
     def accent(self) -> str:
         """Return the current accent role."""

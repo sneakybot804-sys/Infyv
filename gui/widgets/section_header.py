@@ -118,6 +118,14 @@ class SectionHeader(ThemedWidget):
         """Return the subtitle text."""
         return self._subtitle
 
+    def badge_visible(self) -> bool:
+        """Return whether the badge is currently shown."""
+        return self._badge_label.isVisible()
+
+    def divider_visible(self) -> bool:
+        """Return whether the bottom divider is currently shown."""
+        return self._divider.isVisible()
+
     # ------------------------------------------------------------------ #
     # Theming
     # ------------------------------------------------------------------ #

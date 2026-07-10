@@ -9,11 +9,13 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtWidgets import QFrame, QVBoxLayout, QWidget
+from PySide6.QtCore import QAbstractAnimation, QPropertyAnimation
+from PySide6.QtGui import QColor
+from PySide6.QtWidgets import QFrame, QGraphicsDropShadowEffect, QVBoxLayout, QWidget
 
 from gui.theme.manager import ThemeManager
-from gui.widgets import effects, styling
-from gui.widgets.animation import fade
+from gui.widgets import styling
+from gui.widgets.animation import fade, tween_value
 from gui.widgets.base import ThemedWidget
 
 _SHADOW_BY_LEVEL = {
@@ -62,6 +64,13 @@ class GlassCard(ThemedWidget):
         self._outer.addWidget(self._frame)
         self._inner = QVBoxLayout(self._frame)
 
+        # One persistent shadow/glow effect for the card's lifetime; its
+        # intensity is animated between the resting shadow and the neon glow.
+        self._effect = QGraphicsDropShadowEffect(self._frame)
+        self._frame.setGraphicsEffect(self._effect)
+        self._glow_active = False
+        self._blur_anim: Optional[QPropertyAnimation] = None
+
         self.setAccessibleName("card")
         self.apply_theme()
 
@@ -104,10 +113,11 @@ class GlassCard(ThemedWidget):
     # Theming
     # ------------------------------------------------------------------ #
     def apply_theme(self) -> None:
-        """Rebuild the glass styling and the resting elevation shadow.
+        """Rebuild the glass styling and set the effect to its current state.
 
-        The neon glow is applied only on hover/active (see the enter/leave
-        events); at rest the card shows its elevation shadow.
+        The single persistent shadow effect is set to either the resting
+        elevation shadow or the neon glow depending on the current hover
+        state, without animation (this is a restyle, not a transition).
         """
         tokens = self.tokens
         radius = self.scaled(getattr(tokens.radius, self._radius_key))
@@ -116,42 +126,90 @@ class GlassCard(ThemedWidget):
                 tokens.colors, radius=radius, selector="#GlassCard"
             )
         )
-        self._apply_resting_shadow()
+        # Fixed offset from the resting shadow; glow uses zero offset but the
+        # small elevation offset reads fine and avoids a second animation.
+        shadow = self._resting_shadow()
+        self._effect.setOffset(self.scaled(shadow.x), self.scaled(shadow.y))
+        if self._glow_active and self._glow_role is not None:
+            self._effect.setBlurRadius(self.scaled(self._glow_shadow().blur))
+            self._effect.setColor(self._theme.color(f"{self._glow_role}_glow"))
+        else:
+            self._effect.setBlurRadius(self.scaled(shadow.blur))
+            self._effect.setColor(self._theme.color(shadow.color))
 
-    def _apply_resting_shadow(self) -> None:
-        """Install the elevation drop shadow (the at-rest state)."""
-        shadow = getattr(self.tokens.shadows, _SHADOW_BY_LEVEL[self._elevation_level])
-        effects.apply_shadow(
-            self._frame,
-            blur=self.scaled(shadow.blur),
-            x=self.scaled(shadow.x),
-            y=self.scaled(shadow.y),
-            color=self._theme.color(shadow.color),
-        )
+    def glow_active(self) -> bool:
+        """Return whether the hover/active glow is currently shown."""
+        return self._glow_active
 
-    def _apply_hover_glow(self) -> None:
-        """Install the neon glow (the hover/active state).
+    def _resting_shadow(self):
+        """Return the elevation shadow token for the current level."""
+        return getattr(self.tokens.shadows, _SHADOW_BY_LEVEL[self._elevation_level])
 
-        Falls back to the resting shadow when no glow role is configured.
+    def _glow_shadow(self):
+        """Return the glow shadow token for the current glow role."""
+        return getattr(self.tokens.shadows, f"glow_{self._glow_role}")
+
+    def _transition_glow(self, to_glow: bool) -> None:
+        """Smoothly fade the single effect between resting shadow and glow.
+
+        Animates blur radius (QPropertyAnimation on the effect) and color
+        alpha (tween updating the effect color). When animations are disabled
+        the end state is applied instantly.
         """
+        self._glow_active = to_glow
         if self._glow_role is None:
-            self._apply_resting_shadow()
             return
-        glow = getattr(self.tokens.shadows, f"glow_{self._glow_role}")
-        effects.apply_glow(
-            self._frame,
-            blur=self.scaled(glow.blur),
-            color=self._theme.color(f"{self._glow_role}_glow"),
+
+        resting = self._resting_shadow()
+        glow = self._glow_shadow()
+        start_blur = float(self._effect.blurRadius())
+        end_blur = float(self.scaled(glow.blur if to_glow else resting.blur))
+
+        base_color: QColor = (
+            self._theme.color(f"{self._glow_role}_glow")
+            if to_glow
+            else self._theme.color(resting.color)
+        )
+        target_alpha = base_color.alpha()
+        start_alpha = self._effect.color().alpha()
+
+        if not self._animated:
+            self._effect.setBlurRadius(end_blur)
+            self._effect.setColor(base_color)
+            return
+
+        duration = self._theme.duration("fast")
+        easing = self._theme.easing()
+
+        self._blur_anim = QPropertyAnimation(self._effect, b"blurRadius", self)
+        self._blur_anim.setDuration(duration)
+        self._blur_anim.setStartValue(start_blur)
+        self._blur_anim.setEndValue(end_blur)
+        self._blur_anim.setEasingCurve(easing)
+        self._blur_anim.start(QAbstractAnimation.DeletionPolicy.DeleteWhenStopped)
+
+        def _set_alpha(a: float) -> None:
+            c = QColor(base_color)
+            c.setAlpha(int(round(a)))
+            self._effect.setColor(c)
+
+        tween_value(
+            start_alpha,
+            target_alpha,
+            _set_alpha,
+            duration_ms=duration,
+            easing=easing,
+            animated=self._animated,
         )
 
     def enterEvent(self, event) -> None:  # noqa: N802 (Qt override)
-        """Show the neon glow while hovered/active."""
-        self._apply_hover_glow()
+        """Fade the neon glow in while hovered/active."""
+        self._transition_glow(True)
         super().enterEvent(event)
 
     def leaveEvent(self, event) -> None:  # noqa: N802 (Qt override)
-        """Return to the resting elevation shadow when the hover ends."""
-        self._apply_resting_shadow()
+        """Fade back to the resting elevation shadow when the hover ends."""
+        self._transition_glow(False)
         super().leaveEvent(event)
 
     # ------------------------------------------------------------------ #

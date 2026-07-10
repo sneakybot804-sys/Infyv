@@ -20,6 +20,47 @@ from PySide6.QtCore import (
 from PySide6.QtWidgets import QGraphicsOpacityEffect, QWidget
 
 
+def fade_effect(
+    effect: QGraphicsOpacityEffect,
+    start: float,
+    end: float,
+    *,
+    duration_ms: int,
+    easing: QEasingCurve,
+    animated: bool = True,
+    owner: Optional[QWidget] = None,
+) -> Optional[QPropertyAnimation]:
+    """Animate an EXISTING opacity ``effect`` from ``start`` to ``end``.
+
+    Unlike :func:`fade`, this reuses a persistent effect (no new effect is
+    installed per call), giving smooth, non-abrupt transitions when a widget
+    animates repeatedly (hover/press/leave).
+
+    Args:
+        effect: The already-installed opacity effect to animate.
+        start: Starting opacity (0..1).
+        end: Ending opacity (0..1).
+        duration_ms: Duration in milliseconds (caller-resolved from a token).
+        easing: Easing curve (caller-resolved from a token).
+        animated: When ``False``, set ``end`` instantly and return ``None``.
+        owner: Optional parent for the animation's lifetime management.
+
+    Returns:
+        The running :class:`QPropertyAnimation`, or ``None`` when not animated.
+    """
+    if not animated:
+        effect.setOpacity(end)
+        return None
+
+    animation = QPropertyAnimation(effect, b"opacity", owner or effect)
+    animation.setDuration(duration_ms)
+    animation.setStartValue(start)
+    animation.setEndValue(end)
+    animation.setEasingCurve(easing)
+    animation.start(QAbstractAnimation.DeletionPolicy.DeleteWhenStopped)
+    return animation
+
+
 def fade(
     widget: QWidget,
     start: float,

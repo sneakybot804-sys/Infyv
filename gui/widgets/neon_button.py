@@ -14,7 +14,7 @@ from PySide6.QtWidgets import QGraphicsOpacityEffect, QPushButton, QVBoxLayout, 
 
 from gui.theme.manager import ThemeManager
 from gui.widgets import styling
-from gui.widgets.animation import fade
+from gui.widgets.animation import fade_effect
 from gui.widgets.base import ThemedWidget
 
 _VARIANTS = ("primary", "secondary", "ghost")
@@ -63,7 +63,13 @@ class NeonButton(ThemedWidget):
         self._button.setObjectName("NeonButton")
         self._button.setCursor(Qt.CursorShape.PointingHandCursor)
         self._button.clicked.connect(self.clicked.emit)
-        # Hover/press opacity feedback (optional, reduce-motion aware).
+
+        # One persistent opacity effect animated between states (no abrupt
+        # jumps, no per-event effect churn).
+        self._opacity = QGraphicsOpacityEffect(self._button)
+        self._opacity.setOpacity(1.0)
+        self._button.setGraphicsEffect(self._opacity)
+        self._current_opacity = 1.0
         self._button.installEventFilter(self)
 
         layout = QVBoxLayout(self)
@@ -81,25 +87,27 @@ class NeonButton(ThemedWidget):
         if watched is self._button and self._animated:
             kind = event.type()
             if kind == QEvent.Type.Enter:
-                self._animate_opacity(1.0, 0.92)
+                self._animate_opacity(0.92)
             elif kind == QEvent.Type.Leave:
-                self._animate_opacity(0.92, 1.0)
+                self._animate_opacity(1.0)
             elif kind == QEvent.Type.MouseButtonPress:
-                self._animate_opacity(0.92, 0.78)
+                self._animate_opacity(0.78)
             elif kind == QEvent.Type.MouseButtonRelease:
-                self._animate_opacity(0.78, 0.92)
+                self._animate_opacity(0.92)
         return super().eventFilter(watched, event)
 
-    def _animate_opacity(self, start: float, end: float) -> None:
-        """Fade the inner button opacity using theme motion tokens."""
-        fade(
-            self._button,
-            start,
+    def _animate_opacity(self, end: float) -> None:
+        """Smoothly animate the single opacity effect to ``end``."""
+        fade_effect(
+            self._opacity,
+            self._current_opacity,
             end,
             duration_ms=self._theme.duration("fast"),
             easing=self._theme.easing(),
             animated=self._animated,
+            owner=self,
         )
+        self._current_opacity = end
 
     # ------------------------------------------------------------------ #
     # Public API
