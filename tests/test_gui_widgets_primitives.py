@@ -59,13 +59,13 @@ def test_glass_card_hover_toggles_glow_state(app: QApplication) -> None:
     assert card.glow_active() is False
 
 
-def test_neon_button_hover_press_animation_runs(app: QApplication) -> None:
+def test_neon_button_inner_has_no_graphics_effect(app: QApplication) -> None:
+    # The inner button must carry no QGraphicsEffect, so it never nests inside
+    # GlassCard's drop-shadow effect (which caused blank cards / QPainter
+    # warnings). Hover/pressed feedback comes from QSS state rules instead.
     theme = ThemeManager()
     button = NeonButton(theme, "Go", animated=True)
-    # Drive the hover/press animation paths; must not raise. (Temporary
-    # white-box access to the composed inner button for event delivery only.)
-    button.eventFilter(button._button, QEvent(QEvent.Type.Enter))
-    button.eventFilter(button._button, QEvent(QEvent.Type.Leave))
+    assert button._button.graphicsEffect() is None
 
 
 # --------------------------------------------------------------- NeonButton #
