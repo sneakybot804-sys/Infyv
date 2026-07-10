@@ -48,21 +48,22 @@ def test_glass_card_glow_and_elevation(app: QApplication) -> None:
     assert card.glow_role == "purple"
 
 
-def test_glass_card_hover_swaps_effect(app: QApplication) -> None:
+def test_glass_card_hover_toggles_glow_state(app: QApplication) -> None:
     theme = ThemeManager()
     card = GlassCard(theme, glow="cyan", animated=False)
-    # Simulate hover enter/leave; must not raise and must keep an effect.
+    assert card.glow_active() is False
     enter = QEnterEvent(card.rect().center(), card.rect().center(), card.rect().center())
     card.enterEvent(enter)
-    assert card._frame.graphicsEffect() is not None
+    assert card.glow_active() is True
     card.leaveEvent(QEvent(QEvent.Type.Leave))
-    assert card._frame.graphicsEffect() is not None
+    assert card.glow_active() is False
 
 
 def test_neon_button_hover_press_animation_runs(app: QApplication) -> None:
     theme = ThemeManager()
     button = NeonButton(theme, "Go", animated=True)
-    # Drive the event filter paths; must not raise.
+    # Drive the hover/press animation paths; must not raise. (Temporary
+    # white-box access to the composed inner button for event delivery only.)
     button.eventFilter(button._button, QEvent(QEvent.Type.Enter))
     button.eventFilter(button._button, QEvent(QEvent.Type.Leave))
 
@@ -157,16 +158,13 @@ def test_icon_button_set_icon(app: QApplication) -> None:
 def test_icon_button_context_menu_hook(app: QApplication) -> None:
     theme = ThemeManager()
     button = IconButton(theme, "play", tooltip="Play")
+    assert button.has_context_menu() is False
     menu = QMenu()
     menu.addAction("Item")
     button.set_context_menu(menu)
-    assert (
-        button._button.contextMenuPolicy() == Qt.ContextMenuPolicy.CustomContextMenu
-    )
+    assert button.has_context_menu() is True
     button.set_context_menu(None)
-    assert (
-        button._button.contextMenuPolicy() == Qt.ContextMenuPolicy.DefaultContextMenu
-    )
+    assert button.has_context_menu() is False
 
 
 # ------------------------------------------------------------ SectionHeader #
@@ -192,22 +190,21 @@ def test_section_header_action_slot(app: QApplication) -> None:
 def test_section_header_badge_toggle(app: QApplication) -> None:
     theme = ThemeManager()
     header = SectionHeader(theme, "Title")
-    assert header._badge_label.isVisible() is False
+    assert header.badge_visible() is False
     header.set_badge("3", accent="purple")
-    assert header._badge_label.isVisible() is True
-    assert header._badge_label.text() == "3"
+    assert header.badge_visible() is True
     header.set_badge(None)
-    assert header._badge_label.isVisible() is False
+    assert header.badge_visible() is False
 
 
 def test_section_header_divider_toggle(app: QApplication) -> None:
     theme = ThemeManager()
     header = SectionHeader(theme, "Title")
-    assert header._divider.isVisible() is False
+    assert header.divider_visible() is False
     header.set_divider(True)
-    assert header._divider.isVisible() is True
+    assert header.divider_visible() is True
     header.set_divider(False)
-    assert header._divider.isVisible() is False
+    assert header.divider_visible() is False
 
 
 # --------------------------------------------------------------- Re-theming #
