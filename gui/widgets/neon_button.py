@@ -78,11 +78,12 @@ class NeonButton(ThemedWidget):
     # render (it caused 'Painter not active' warnings and blank cards).
     #
     # This is intentionally minimal, not a redesign. Richer hover/press
-    # animation can be restored later using a rendering-safe approach that
-    # does NOT nest a QGraphicsEffect inside another effect -- e.g. animating
-    # a QSS-driven property (custom Q_PROPERTY + dynamic stylesheet) or a
-    # color/geometry tween on the inner button. The public API is unchanged,
-    # so that restoration will not affect callers.
+    # animation will be revisited in Phase 8H (Animation & Polish) using a
+    # rendering-safe approach that does NOT nest a QGraphicsEffect inside
+    # another effect -- e.g. animating a QSS-driven property (custom
+    # Q_PROPERTY + dynamic stylesheet) or a color/geometry tween on the inner
+    # button. The public API is unchanged, so that restoration will not
+    # affect callers.
 
     # ------------------------------------------------------------------ #
     # Public API

@@ -142,8 +142,8 @@ hover/pressed/disabled feedback now comes from QSS state rules only. This
 keeps the public API unchanged and the gallery rendering correctly with no
 QPainter warnings.
 
-**Planned restoration:** reintroduce richer hover/press animation using a
-rendering-safe approach that does not nest graphics effects -- for example an
-animated custom `Q_PROPERTY` driving a dynamic stylesheet, or a color/geometry
-tween on the inner button. Because the public API is stable, this change will
-be internal only.
+**Planned restoration (Phase 8H — Animation & Polish):** reintroduce richer
+hover/press animation using a rendering-safe approach that does not nest
+graphics effects -- for example an animated custom `Q_PROPERTY` driving a
+dynamic stylesheet, or a color/geometry tween on the inner button. Because the
+public API is stable, this change will be internal only.
