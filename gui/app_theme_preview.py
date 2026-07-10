@@ -51,7 +51,6 @@ def main() -> int:
     """Launch the themed component gallery and run the Qt event loop."""
     configure_high_dpi()
 
-    from PySide6.QtCore import Qt
     from PySide6.QtWidgets import (
         QApplication,
         QHBoxLayout,
@@ -136,7 +135,6 @@ def main() -> int:
     )
 
     root.addStretch(1)
-    window.setLayout(root)
     window.show()
     return app.exec()
 

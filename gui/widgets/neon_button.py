@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QEvent, QPropertyAnimation, Qt, Signal
-from PySide6.QtWidgets import QGraphicsOpacityEffect, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import QPushButton, QVBoxLayout, QWidget
 
 from gui.theme.manager import ThemeManager
 from gui.widgets import styling
@@ -63,15 +63,6 @@ class NeonButton(ThemedWidget):
         self._button.setCursor(Qt.CursorShape.PointingHandCursor)
         self._button.clicked.connect(self.clicked.emit)
 
-        # One persistent opacity effect AND one reused animation animated
-        # between states (no abrupt jumps, no per-event effect/animation
-        # allocation).
-        self._opacity = QGraphicsOpacityEffect(self._button)
-        self._opacity.setOpacity(1.0)
-        self._button.setGraphicsEffect(self._opacity)
-        self._opacity_anim = QPropertyAnimation(self._opacity, b"opacity", self)
-        self._button.installEventFilter(self)
-
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._button)
@@ -79,39 +70,12 @@ class NeonButton(ThemedWidget):
         self.setAccessibleName(text or "button")
         self.apply_theme()
 
-    # ------------------------------------------------------------------ #
-    # Hover / press animation
-    # ------------------------------------------------------------------ #
-    def eventFilter(self, watched, event) -> bool:  # noqa: N802 (Qt override)
-        """Animate opacity on hover/press for smooth tactile feedback."""
-        if watched is self._button and self._animated:
-            kind = event.type()
-            if kind == QEvent.Type.Enter:
-                self._animate_opacity(0.92)
-            elif kind == QEvent.Type.Leave:
-                self._animate_opacity(1.0)
-            elif kind == QEvent.Type.MouseButtonPress:
-                self._animate_opacity(0.78)
-            elif kind == QEvent.Type.MouseButtonRelease:
-                self._animate_opacity(0.92)
-        return super().eventFilter(watched, event)
-
-    def _animate_opacity(self, end: float) -> None:
-        """Smoothly animate the single, reused opacity animation to ``end``.
-
-        Any in-flight run is stopped and the same animation object is
-        re-targeted from the current opacity, so hover/press/release
-        transitions interrupt smoothly without allocating a new animation.
-        """
-        if not self._animated:
-            self._opacity.setOpacity(end)
-            return
-        self._opacity_anim.stop()
-        self._opacity_anim.setDuration(self._theme.duration("fast"))
-        self._opacity_anim.setStartValue(float(self._opacity.opacity()))
-        self._opacity_anim.setEndValue(float(end))
-        self._opacity_anim.setEasingCurve(self._theme.easing())
-        self._opacity_anim.start()
+    # Hover / pressed / disabled feedback is provided by the QSS state rules
+    # in ``neon_button_qss`` (``:hover`` / ``:pressed`` / ``:disabled``). No
+    # QGraphicsEffect is used on the button: a graphics effect here would be
+    # nested inside GlassCard's drop-shadow effect source tree, which Qt
+    # cannot render (it causes 'Painter not active' warnings and blank
+    # cards).
 
     # ------------------------------------------------------------------ #
     # Public API
