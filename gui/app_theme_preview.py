@@ -25,12 +25,17 @@ def _labeled_card(theme, title, subtitle, badge, body_layout):
 
     Helper local to the gallery; not part of the widget library.
     """
-    from PySide6.QtWidgets import QLayout, QVBoxLayout, QWidget
+    from PySide6.QtWidgets import QLayout, QSizePolicy, QVBoxLayout, QWidget
 
     from gui.widgets import GlassCard, SectionHeader
 
     tokens = theme.tokens
     card = GlassCard(theme, glow="cyan")
+    # Keep the card at its natural (sizeHint) height: a QVBoxLayout would
+    # otherwise let a Preferred-height card expand to fill a maximized window,
+    # producing large gaps. Fixed vertical policy leaves all surplus height to
+    # the trailing root stretch. Horizontal policy is left at the default.
+    card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
     content = QWidget()
     layout = QVBoxLayout(content)
     layout.setContentsMargins(
