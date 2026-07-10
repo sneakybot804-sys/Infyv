@@ -200,38 +200,22 @@ def test_section_header_action_slot(app: QApplication) -> None:
 
 def test_section_header_badge_toggle(app: QApplication) -> None:
     theme = ThemeManager()
-    # isVisible() reflects effective visibility, so host the header in a shown
-    # top-level widget before asserting the badge's visibility.
-    host = QWidget()
-    layout = QVBoxLayout(host)
     header = SectionHeader(theme, "Title")
-    layout.addWidget(header)
-    host.show()
-    try:
-        assert header.badge_visible() is False
-        header.set_badge("3", accent="purple")
-        assert header.badge_visible() is True
-        header.set_badge(None)
-        assert header.badge_visible() is False
-    finally:
-        host.hide()
+    assert header.badge_visible() is False
+    header.set_badge("3", accent="purple")
+    assert header.badge_visible() is True
+    header.set_badge(None)
+    assert header.badge_visible() is False
 
 
 def test_section_header_divider_toggle(app: QApplication) -> None:
     theme = ThemeManager()
-    host = QWidget()
-    layout = QVBoxLayout(host)
     header = SectionHeader(theme, "Title")
-    layout.addWidget(header)
-    host.show()
-    try:
-        assert header.divider_visible() is False
-        header.set_divider(True)
-        assert header.divider_visible() is True
-        header.set_divider(False)
-        assert header.divider_visible() is False
-    finally:
-        host.hide()
+    assert header.divider_visible() is False
+    header.set_divider(True)
+    assert header.divider_visible() is True
+    header.set_divider(False)
+    assert header.divider_visible() is False
 
 
 # --------------------------------------------------------------- Re-theming #

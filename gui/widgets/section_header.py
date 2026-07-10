@@ -37,6 +37,8 @@ class SectionHeader(ThemedWidget):
         self._title = title
         self._subtitle = subtitle
         self._action: Optional[QWidget] = None
+        self._badge_on = False
+        self._divider_on = False
 
         self._column = QVBoxLayout(self)
         self._column.setContentsMargins(0, 0, 0, 0)
@@ -99,16 +101,16 @@ class SectionHeader(ThemedWidget):
     def set_badge(self, text: Optional[str], *, accent: str = "cyan") -> None:
         """Set (or clear with ``None``) a small badge next to the title."""
         self._badge_accent = accent
+        self._badge_on = bool(text)
         if text:
             self._badge_label.setText(text)
-            self._badge_label.setVisible(True)
-        else:
-            self._badge_label.setVisible(False)
+        self._badge_label.setVisible(self._badge_on)
         self.apply_theme()
 
     def set_divider(self, visible: bool) -> None:
         """Show or hide the bottom divider line."""
-        self._divider.setVisible(visible)
+        self._divider_on = bool(visible)
+        self._divider.setVisible(self._divider_on)
 
     def title(self) -> str:
         """Return the title text."""
@@ -119,12 +121,21 @@ class SectionHeader(ThemedWidget):
         return self._subtitle
 
     def badge_visible(self) -> bool:
-        """Return whether the badge is currently shown."""
-        return self._badge_label.isVisible()
+        """Return whether the badge is enabled (requested-state accessor).
+
+        Reports the requested badge state, independent of whether the widget
+        tree is currently shown (``QWidget.isVisible()`` would be False for an
+        unshown ancestor).
+        """
+        return self._badge_on
 
     def divider_visible(self) -> bool:
-        """Return whether the bottom divider is currently shown."""
-        return self._divider.isVisible()
+        """Return whether the divider is enabled (requested-state accessor).
+
+        Reports the requested divider state, independent of whether the widget
+        tree is currently shown.
+        """
+        return self._divider_on
 
     # ------------------------------------------------------------------ #
     # Theming
