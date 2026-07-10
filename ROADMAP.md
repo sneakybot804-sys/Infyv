@@ -12,11 +12,28 @@ small focused merge requests, and must not break earlier phases.
 - **Phase 4A — Generic video analysis.** Game-agnostic
   metadata/scene/motion/brightness/static/idle/black-screen →
   `analysis.json`.
+- **Phase 5A-5E — Gaming intelligence.** Highlight scoring
+  (`highlight.json`), OCR (`ocr.json`), audio analysis (`audio.json`),
+  signal fusion (`enriched_highlight.json`), AI decision
+  (`edit_plan.json`).
+- **Phase 6 — Automatic rendering.** Trims and concatenates the edit plan
+  into a rendered MP4.
+- **Phase 7 — Subtitle engine.** `subtitles.json` (7.1) + `.srt` sidecar.
 
-## Phase 5 — Gaming Intelligence
+## Phase 8 — Premium Desktop GUI (in progress)
 
-Turn the generic `analysis.json` into game-aware understanding. **Design
-only** at this stage — see `PHASE5_DESIGN.md`.
+A PySide6 desktop application over a new, permanent, Qt-free `gui_core`
+application layer. Backend stays frozen. See `PHASE8_DESIGN.md`.
+
+- **8A — `gui_core`.** Facade, event bus, plugin registry, commands,
+  pipeline gating, immutable state, runner, structured logs (this step).
+- **8B-8I — GUI.** Theme system, reusable widgets, main window, dashboard,
+  pipeline view, remaining pages, animations/polish, optimization.
+
+## Historical Phase 5 design notes
+
+The original design-only notes for Phase 5 are retained below for reference;
+the phases above are now implemented. See `PHASE5_DESIGN.md`.
 
 - **Kill detection** — detect elimination events (kill feed / on-screen
   cues) as candidate highlights.
