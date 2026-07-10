@@ -132,14 +132,24 @@ class NeonButton(ThemedWidget):
         self.apply_theme()
 
     def set_variant(self, variant: str) -> None:
-        """Set the visual variant (``primary``/``secondary``/``ghost``)."""
+        """Set the visual variant (``primary``/``secondary``/``ghost``).
+
+        No-op (no restyle) when the variant is unchanged.
+        """
         if variant not in _VARIANTS:
             raise ValueError(f"Unknown variant: {variant!r}")
+        if variant == self._variant:
+            return
         self._variant = variant
         self.apply_theme()
 
     def set_accent(self, accent: str) -> None:
-        """Set the accent role (``blue``/``cyan``/``purple``)."""
+        """Set the accent role (``blue``/``cyan``/``purple``).
+
+        No-op (no restyle) when the accent is unchanged.
+        """
+        if accent == self._accent:
+            return
         self._accent = accent
         self.apply_theme()
 

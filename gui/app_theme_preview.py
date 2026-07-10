@@ -119,6 +119,22 @@ def main() -> int:
         _labeled_card(theme, "Icon Buttons", "IconButton states", None, icons)
     )
 
+    # States card: disabled + loading examples.
+    states = QHBoxLayout()
+    states.setSpacing(tokens.spacing.md)
+    disabled_btn = NeonButton(theme, "Disabled", variant="secondary")
+    disabled_btn.setEnabled(False)
+    disabled_btn.setFixedWidth(theme.tokens.spacing.xxl * 5)
+    loading_btn = NeonButton(theme, "Saving", variant="primary", accent="cyan")
+    loading_btn.set_loading(True)
+    loading_btn.setFixedWidth(theme.tokens.spacing.xxl * 5)
+    states.addWidget(disabled_btn)
+    states.addWidget(loading_btn)
+    states.addStretch(1)
+    root.addWidget(
+        _labeled_card(theme, "States", "Disabled and loading", None, states)
+    )
+
     root.addStretch(1)
     window.setLayout(root)
     window.show()

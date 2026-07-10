@@ -91,5 +91,40 @@ optional divider.
 
 `gui/app_theme_preview.py` is a dev-only component gallery built exclusively
 from these primitives with dummy content (token-driven margins/spacing,
-aligned rows, consistent sizing). It is not part of the application and wires
-no backend.
+aligned rows, consistent sizing, plus hover/disabled/loading examples). It is
+not part of the application and wires no backend.
+
+## Extension guidelines (authoring a new widget)
+
+Follow these steps so future widgets match the established architecture:
+
+1. **Subclass `ThemedWidget`** and take `theme: ThemeManager` as the first
+   constructor argument. Call `super().__init__(theme, parent)`.
+2. **Compose, don't deep-inherit.** Build the widget from Qt primitives or
+   other themed widgets held as members. Re-expose only the signals you need.
+3. **Resolve visuals through the manager**: `theme.color/font/easing/
+   duration`. Never import `gui.theme.tokens/palettes/motion/colorutils` or
+   `gui_core`.
+4. **Put QSS in `styling.py`** as a pure `colors + scalars -> str` function;
+   scale sizes/radii with `self.scaled(...)`.
+5. **Override `apply_theme()`** to (re)build QSS/effects from `self.tokens`.
+   Guard setters so they only call `apply_theme()` when state actually
+   changes (avoid needless repaints).
+6. **Create graphics effects and animations once** (in `__init__`) and reuse
+   them. On interaction, `stop()` and re-target the existing animation from
+   the current animated value; never allocate per event.
+7. **Make motion optional and reduce-motion aware** (`animated` flag; when
+   False, apply the end state instantly).
+8. **Accessibility**: set an accessible name; make interactive widgets
+   focusable with the neon focus ring; support Enter/Space activation.
+9. **Public API**: expose intent-revealing methods/properties and small state
+   accessors (e.g. `..._visible()`), not internal widgets. Add full type
+   hints and docstrings.
+10. **Tests**: prefer the public API; use white-box access only where Qt
+    event delivery to a composed child is unavoidable, and don't expand it.
+
+## Frozen public API
+
+After 8C-2, the public API of GlassCard, NeonButton, IconButton and
+SectionHeader is considered stable and should not change unless a bug is
+found.

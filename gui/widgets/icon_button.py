@@ -79,12 +79,16 @@ class IconButton(ThemedWidget):
     # Public API
     # ------------------------------------------------------------------ #
     def set_icon(self, name: str) -> None:
-        """Set the icon by name."""
+        """Set the icon by name (no-op when unchanged)."""
+        if name == self._icon_name:
+            return
         self._icon_name = name
         self.apply_theme()
 
     def set_accent(self, accent: str) -> None:
-        """Set the accent role."""
+        """Set the accent role (no-op when unchanged)."""
+        if accent == self._accent:
+            return
         self._accent = accent
         self.apply_theme()
 

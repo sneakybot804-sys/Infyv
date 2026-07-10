@@ -96,12 +96,16 @@ class GlassCard(ThemedWidget):
         return self._content
 
     def set_glow(self, role: Optional[str]) -> None:
-        """Set the glow accent role (or ``None`` for a plain shadow)."""
+        """Set the glow accent role (or ``None``); no-op when unchanged."""
+        if role == self._glow_role:
+            return
         self._glow_role = role
         self.apply_theme()
 
     def set_elevation(self, level: str) -> None:
-        """Set the elevation shadow level (used when no glow is set)."""
+        """Set the elevation shadow level; no-op when unchanged."""
+        if level == self._elevation_level:
+            return
         self._elevation_level = level
         self.apply_theme()
 
