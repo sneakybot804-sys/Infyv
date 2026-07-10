@@ -60,12 +60,28 @@ def test_family_stack_includes_fallbacks() -> None:
     assert "sans-serif" in stack
 
 
-def test_tokens_source_references_no_qt() -> None:
-    # The pure-data token module must not reference PySide6/Qt in its source.
+def test_tokens_module_imports_no_qt() -> None:
+    # The pure-data token module must import no Qt module. Inspect the actual
+    # import statements (via ast) rather than scanning raw file text, so a
+    # docstring that mentions Qt class names does not trigger a false failure.
+    import ast
+
     source = Path(__file__).resolve().parent.parent / "gui" / "theme" / "tokens.py"
-    text = source.read_text(encoding="utf-8")
-    assert "PySide6" not in text
-    assert "QColor" not in text
-    assert "QFont" not in text
-    assert "QPalette" not in text
-    assert "QEasingCurve" not in text
+    tree = ast.parse(source.read_text(encoding="utf-8"))
+
+    imported: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported.extend(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            if node.module:
+                imported.append(node.module)
+
+    forbidden = ("PySide6", "PyQt5", "PyQt6", "shiboken6")
+    offenders = [
+        name
+        for name in imported
+        for prefix in forbidden
+        if name == prefix or name.startswith(prefix + ".")
+    ]
+    assert not offenders, f"tokens.py must import no Qt module; found {offenders}"
