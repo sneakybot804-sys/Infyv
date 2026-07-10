@@ -13,30 +13,43 @@ Architectural contract:
   inside the ``gui/`` package.
 * Business logic lives in dedicated services; the facade only orchestrates.
 
-This module is built incrementally over Phase 8A. During early sub-steps only
-the already-implemented foundation types are re-exported; the facade is added
-in a later sub-step of the same phase.
+``ApplicationFacade`` is the intended public entry point; the value types are
+re-exported for callers that need to type-annotate handlers and results.
 """
 from __future__ import annotations
 
+from gui_core.artifacts import ArtifactInfo, ArtifactKind
+from gui_core.commands import PhaseResult
 from gui_core.errors import (
     GuiCoreError,
     PhaseGatedError,
     ProjectNotLoadedError,
     UnknownPhaseError,
 )
-from gui_core.events import Event, EventBus, EventPriority
+from gui_core.events import Event, EventBus, EventMessage, EventPriority
+from gui_core.facade import ApplicationFacade
 from gui_core.logs import CoreLogger, LogLevel, LogRecord
+from gui_core.registry import PhaseCategory, PhaseId, PhasePlugin
+from gui_core.state import ProjectState
 
 __all__ = [
+    "ApplicationFacade",
     "GuiCoreError",
     "ProjectNotLoadedError",
     "UnknownPhaseError",
     "PhaseGatedError",
     "Event",
+    "EventMessage",
     "EventPriority",
     "EventBus",
     "LogLevel",
     "LogRecord",
     "CoreLogger",
+    "ArtifactInfo",
+    "ArtifactKind",
+    "PhaseResult",
+    "PhaseCategory",
+    "PhaseId",
+    "PhasePlugin",
+    "ProjectState",
 ]
