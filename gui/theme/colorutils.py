@@ -8,7 +8,44 @@ format, and there are still no hardcoded colors outside the token definitions.
 """
 from __future__ import annotations
 
+from typing import Any
+
 from PySide6.QtGui import QColor
+
+#: Semantic role name -> attribute on a colors token object.
+_COLOR_ROLE_ATTRS = {
+    "blue": "accent_blue",
+    "cyan": "accent_cyan",
+    "purple": "accent_purple",
+    "success": "success",
+    "warning": "warning",
+    "error": "error",
+    "blue_glow": "accent_blue_glow",
+    "cyan_glow": "accent_cyan_glow",
+    "purple_glow": "accent_purple_glow",
+    "success_glow": "success_glow",
+    "warning_glow": "warning_glow",
+    "error_glow": "error_glow",
+}
+
+
+def resolve_color(colors: Any, value: str) -> QColor:
+    """Resolve ``value`` to a :class:`QColor` against a ``colors`` token object.
+
+    Args:
+        colors: The active color tokens object (duck-typed; any object exposing
+            the accent/status attributes, i.e. ``DesignTokens.colors``). It is
+            passed in so this module imports no token module.
+        value: Either a semantic role name (``blue``, ``cyan``, ``purple``,
+            ``success``, ``warning``, ``error`` and their ``*_glow`` variants)
+            or a raw color token string (``#RRGGBB`` / ``rgba(...)``).
+
+    Returns:
+        The resolved :class:`QColor`.
+    """
+    attr = _COLOR_ROLE_ATTRS.get(value)
+    token = getattr(colors, attr) if attr is not None else value
+    return parse_color(token)
 
 
 def parse_color(token: str) -> QColor:

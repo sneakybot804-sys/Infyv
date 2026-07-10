@@ -18,10 +18,10 @@ from PySide6.QtGui import QColor, QFont
 from PySide6.QtCore import QEasingCurve
 from PySide6.QtWidgets import QApplication
 
-from gui.theme.colorutils import parse_color
+from gui.theme.colorutils import resolve_color
 from gui.theme.fonts import make_qfont, register_bundled_fonts
 from gui.theme.icons import IconLoader
-from gui.theme.motion import easing_curve
+from gui.theme.motion import duration_ms, easing_curve
 from gui.theme.palette_builder import build_qpalette
 from gui.theme.palettes import DARK_TOKENS
 from gui.theme.qss import build_stylesheet
@@ -100,38 +100,11 @@ class ThemeManager:
     # QEasingCurve) and numeric durations without importing token modules,
     # colorutils, motion or fonts, and without duplicating any conversion.
     def color(self, value: str) -> QColor:
-        """Resolve ``value`` to a :class:`QColor`.
+        """Resolve a role name or raw token string to a :class:`QColor`.
 
-        Args:
-            value: Either a raw color token string (``#RRGGBB`` / ``rgba(...)``)
-                or a semantic role name. Recognized role names are
-                ``blue``, ``cyan``, ``purple``, ``success``, ``warning``,
-                ``error`` and their ``<role>_glow`` variants.
-
-        Returns:
-            The corresponding :class:`QColor`.
+        Thin delegate to :func:`gui.theme.colorutils.resolve_color`.
         """
-        token = self._resolve_color_token(value)
-        return parse_color(token)
-
-    def _resolve_color_token(self, value: str) -> str:
-        """Map a semantic role name to its color token, else return ``value``."""
-        c = self._active.colors
-        roles = {
-            "blue": c.accent_blue,
-            "cyan": c.accent_cyan,
-            "purple": c.accent_purple,
-            "success": c.success,
-            "warning": c.warning,
-            "error": c.error,
-            "blue_glow": c.accent_blue_glow,
-            "cyan_glow": c.accent_cyan_glow,
-            "purple_glow": c.accent_purple_glow,
-            "success_glow": c.success_glow,
-            "warning_glow": c.warning_glow,
-            "error_glow": c.error_glow,
-        }
-        return roles.get(value, value)
+        return resolve_color(self._active.colors, value)
 
     def font(self, style: str = "body") -> QFont:
         """Build a :class:`QFont` for a typography ``style`` name.
@@ -160,20 +133,9 @@ class ThemeManager:
     def duration(self, name: str = "normal") -> int:
         """Return a motion duration in milliseconds by ``name``.
 
-        Args:
-            name: One of ``instant``, ``fast``, ``normal``, ``slow``.
-
-        Raises:
-            KeyError: If ``name`` is not a known duration.
+        Thin delegate to :func:`gui.theme.motion.duration_ms`.
         """
-        motion = self._active.motion
-        durations = {
-            "instant": motion.duration_instant_ms,
-            "fast": motion.duration_fast_ms,
-            "normal": motion.duration_normal_ms,
-            "slow": motion.duration_slow_ms,
-        }
-        return durations[name]
+        return duration_ms(self._active.motion, name)
 
     # ------------------------------------------------------------------ #
     # Qt application

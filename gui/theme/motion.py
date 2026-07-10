@@ -32,3 +32,22 @@ def easing_curve(name: str) -> QEasingCurve:
 def standard_easing(motion: MotionTokens) -> QEasingCurve:
     """Return the theme's standard easing curve."""
     return easing_curve(motion.easing_standard)
+
+
+def duration_ms(motion: MotionTokens, name: str = "normal") -> int:
+    """Return a motion duration in milliseconds by ``name``.
+
+    Args:
+        motion: The active motion tokens.
+        name: One of ``instant``, ``fast``, ``normal``, ``slow``.
+
+    Raises:
+        KeyError: If ``name`` is not a known duration.
+    """
+    durations = {
+        "instant": motion.duration_instant_ms,
+        "fast": motion.duration_fast_ms,
+        "normal": motion.duration_normal_ms,
+        "slow": motion.duration_slow_ms,
+    }
+    return durations[name]
