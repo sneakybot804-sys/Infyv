@@ -24,8 +24,10 @@ Phase 8 (the premium desktop GUI) has started with Phase 8A, the Qt-free
 | 6 | Automatic video rendering (rendered MP4) | Done |
 | 7 | Subtitle engine (`subtitles.json` 7.1 + `.srt`) | Done |
 | 8A | Qt-free `gui_core` application layer | Done (verified: 219 passed) |
-| 8B | Theme foundation (tokens, dark theme, ThemeManager) | In progress |
-| 8C-8I | Premium PySide6 GUI (widgets, pages, polish) | Not started |
+| 8B | Theme foundation (tokens, dark theme, ThemeManager) | Done (verified) |
+| 8C-1 | Widget infrastructure (base, styling, animation, effects) | Done (verified) |
+| 8C-2 | Primitive widgets (GlassCard, NeonButton, IconButton, SectionHeader) | In progress |
+| 8C-3..8C-6 / 8D-8I | Remaining widgets, pages, polish | Not started |
 
 ## Pipeline
 

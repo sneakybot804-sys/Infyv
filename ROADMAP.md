@@ -31,8 +31,12 @@ application layer. Backend stays frozen. See `PHASE8_DESIGN.md`.
   futuristic neon theme, glassmorphism/shadow/blur/motion tokens,
   typography/spacing/radius scales, SVG icon infrastructure, DPI support, and
   a single-authority ThemeManager with a dark-only switching seam (this step).
-- **8C-8I — GUI.** Reusable widgets, main window, dashboard, pipeline view,
-  remaining pages, animations/polish, optimization.
+- **8C — Widget library.** Built in verified sub-steps: 8C-1 infrastructure
+  (base/styling/animation/effects), 8C-2 primitives (GlassCard, NeonButton,
+  IconButton, SectionHeader), 8C-3..8C-6 information/progress/interactive/
+  advanced widgets. See `PHASE8C_DESIGN.md`.
+- **8D-8I — GUI.** Main window, dashboard, pipeline view, remaining pages,
+  animations/polish, optimization.
 
 ## Historical Phase 5 design notes
 

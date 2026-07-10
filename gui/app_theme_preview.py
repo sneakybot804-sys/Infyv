@@ -19,10 +19,39 @@ import sys
 from gui.theme.dpi import configure_high_dpi
 
 
+def _labeled_card(theme, title, subtitle, badge, body_layout):
+    """Build a GlassCard whose content is a header plus a body layout.
+
+    Helper local to the gallery; not part of the widget library.
+    """
+    from PySide6.QtWidgets import QVBoxLayout, QWidget
+
+    from gui.widgets import GlassCard, SectionHeader
+
+    tokens = theme.tokens
+    card = GlassCard(theme, glow="cyan")
+    content = QWidget()
+    layout = QVBoxLayout(content)
+    layout.setContentsMargins(
+        tokens.spacing.lg, tokens.spacing.lg, tokens.spacing.lg, tokens.spacing.lg
+    )
+    layout.setSpacing(tokens.spacing.md)
+
+    header = SectionHeader(theme, title, subtitle=subtitle)
+    if badge:
+        header.set_badge(badge, accent="purple")
+    header.set_divider(True)
+    layout.addWidget(header)
+    layout.addLayout(body_layout)
+    card.set_content(content)
+    return card
+
+
 def main() -> int:
-    """Launch the themed widget showcase and run the Qt event loop."""
+    """Launch the themed component gallery and run the Qt event loop."""
     configure_high_dpi()
 
+    from PySide6.QtCore import Qt
     from PySide6.QtWidgets import (
         QApplication,
         QHBoxLayout,
@@ -31,48 +60,67 @@ def main() -> int:
     )
 
     from gui.theme.manager import ThemeManager
-    from gui.widgets import GlassCard, IconButton, NeonButton, SectionHeader
+    from gui.widgets import IconButton, NeonButton, SectionHeader
 
     app = QApplication(sys.argv)
 
     theme = ThemeManager()
     theme.apply(app)
+    tokens = theme.tokens
 
     window = QWidget()
-    window.setWindowTitle("Widget Showcase - Dark")
-    window.resize(960, 600)
+    window.setWindowTitle("Component Gallery - Dark")
+    window.resize(1040, 720)
 
     root = QVBoxLayout(window)
+    m = tokens.spacing.xxl
+    root.setContentsMargins(m, m, m, m)
+    root.setSpacing(tokens.spacing.xl)
 
-    header = SectionHeader(
-        theme, "Primitive Widgets", subtitle="Phase 8C-2 showcase"
+    # Page title.
+    title = SectionHeader(
+        theme,
+        "Component Gallery",
+        subtitle="Premium primitive widgets - Phase 8C-2",
     )
-    header.set_action(NeonButton(theme, "Run", variant="primary", accent="cyan"))
-    root.addWidget(header)
+    title.set_badge("dark", accent="cyan")
+    root.addWidget(title)
 
-    # A glass card containing dummy button rows.
-    card = GlassCard(theme, glow="purple")
-    card_body = QWidget()
-    body_layout = QVBoxLayout(card_body)
+    # Buttons card.
+    buttons = QHBoxLayout()
+    buttons.setSpacing(tokens.spacing.md)
+    for label, variant, accent in (
+        ("Primary", "primary", "blue"),
+        ("Secondary", "secondary", "cyan"),
+        ("Ghost", "ghost", "purple"),
+    ):
+        b = NeonButton(theme, label, variant=variant, accent=accent)
+        b.setFixedWidth(theme.tokens.spacing.xxl * 5)
+        buttons.addWidget(b)
+    disabled = NeonButton(theme, "Disabled", variant="secondary")
+    disabled.setEnabled(False)
+    disabled.setFixedWidth(theme.tokens.spacing.xxl * 5)
+    buttons.addWidget(disabled)
+    buttons.addStretch(1)
+    root.addWidget(
+        _labeled_card(theme, "Buttons", "NeonButton variants", "4", buttons)
+    )
 
-    button_row = QHBoxLayout()
-    button_row.addWidget(NeonButton(theme, "Primary", variant="primary", accent="blue"))
-    button_row.addWidget(NeonButton(theme, "Secondary", variant="secondary", accent="cyan"))
-    button_row.addWidget(NeonButton(theme, "Ghost", variant="ghost", accent="purple"))
-    body_layout.addLayout(button_row)
-
-    icon_row = QHBoxLayout()
-    icon_row.addWidget(IconButton(theme, "play", tooltip="Play", accent="cyan"))
-    icon_row.addWidget(
+    # Icon buttons card.
+    icons = QHBoxLayout()
+    icons.setSpacing(tokens.spacing.md)
+    icons.addWidget(IconButton(theme, "play", tooltip="Play", accent="cyan"))
+    icons.addWidget(
         IconButton(theme, "spark", tooltip="Sparkle", accent="purple", checkable=True)
     )
-    icon_row.addStretch(1)
-    body_layout.addLayout(icon_row)
+    icons.addWidget(IconButton(theme, "play", tooltip="Blue", accent="blue"))
+    icons.addStretch(1)
+    root.addWidget(
+        _labeled_card(theme, "Icon Buttons", "IconButton states", None, icons)
+    )
 
-    card.set_content(card_body)
-    root.addWidget(card)
     root.addStretch(1)
-
+    window.setLayout(root)
     window.show()
     return app.exec()
 
