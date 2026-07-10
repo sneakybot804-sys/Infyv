@@ -9,5 +9,6 @@ pytest
 # auto-installed by this project.
 pytesseract
 # Phase 8B GUI (PySide6). Used ONLY by the gui/ package; gui_core and the
-# backend never import Qt. Pinned to a stable 6.7 series.
-PySide6>=6.7,<6.8
+# backend never import Qt. Pinned to the 6.9 series, which provides wheels for
+# current Python versions (including Python 3.14).
+PySide6>=6.9,<6.10
