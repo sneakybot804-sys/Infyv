@@ -101,11 +101,18 @@ class GlassCard(ThemedWidget):
     # ------------------------------------------------------------------ #
     def set_content(self, widget: QWidget) -> None:
         """Replace the card's content with ``widget``."""
+        _dbg(
+            f"set_content #{self._dbg_id} widget={type(widget).__name__} "
+            f"parent_before={widget.parent() is not None}"
+        )
         if self._content is not None:
             self._inner.removeWidget(self._content)
             self._content.setParent(None)
         self._content = widget
         self._inner.addWidget(widget)
+        _dbg(
+            f"set_content #{self._dbg_id} done parent_after={widget.parent() is not None}"
+        )
 
     def content(self) -> Optional[QWidget]:
         """Return the current content widget, or ``None``."""
