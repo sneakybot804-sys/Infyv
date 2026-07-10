@@ -15,14 +15,13 @@ other themed widgets rather than deepening the inheritance chain.
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QWidget
 
 from gui.theme.dpi import scale as dpi_scale
 from gui.theme.manager import ThemeManager
-from gui.theme.tokens import DesignTokens
 
 
 class ThemedWidget(QWidget):
@@ -49,11 +48,17 @@ class ThemedWidget(QWidget):
         return self._theme
 
     @property
-    def tokens(self) -> DesignTokens:
-        """Return the active design tokens via the manager."""
+    def tokens(self) -> Any:
+        """Return the active design tokens via the manager.
+
+        Typed as ``Any`` deliberately: the widget layer must not import the
+        token module, so the concrete ``DesignTokens`` type is not referenced
+        here. Callers access the same attributes ``ThemeManager.tokens``
+        exposes.
+        """
         return self._theme.tokens
 
-    def _on_theme_changed(self, _tokens: DesignTokens) -> None:
+    def _on_theme_changed(self, _tokens: Any) -> None:
         """Re-apply styling when the active theme changes.
 
         Subclasses override :meth:`apply_theme`; this indirection lets the
