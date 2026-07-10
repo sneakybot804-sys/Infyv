@@ -27,8 +27,12 @@ application layer. Backend stays frozen. See `PHASE8_DESIGN.md`.
 
 - **8A — `gui_core`.** Facade, event bus, plugin registry, commands,
   pipeline gating, immutable state, runner, structured logs (this step).
-- **8B-8I — GUI.** Theme system, reusable widgets, main window, dashboard,
-  pipeline view, remaining pages, animations/polish, optimization.
+- **8B — Theme foundation.** Centralized Qt-free design tokens, dark
+  futuristic neon theme, glassmorphism/shadow/blur/motion tokens,
+  typography/spacing/radius scales, SVG icon infrastructure, DPI support, and
+  a single-authority ThemeManager with a dark-only switching seam (this step).
+- **8C-8I — GUI.** Reusable widgets, main window, dashboard, pipeline view,
+  remaining pages, animations/polish, optimization.
 
 ## Historical Phase 5 design notes
 

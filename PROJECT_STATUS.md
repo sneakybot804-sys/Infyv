@@ -23,8 +23,9 @@ Phase 8 (the premium desktop GUI) has started with Phase 8A, the Qt-free
 | 5E | AI decision pipeline (`edit_plan.json`, 5e.1) | Done |
 | 6 | Automatic video rendering (rendered MP4) | Done |
 | 7 | Subtitle engine (`subtitles.json` 7.1 + `.srt`) | Done |
-| 8A | Qt-free `gui_core` application layer | In progress |
-| 8B-8I | Premium PySide6 GUI (theme, widgets, pages, polish) | Not started |
+| 8A | Qt-free `gui_core` application layer | Done (verified: 219 passed) |
+| 8B | Theme foundation (tokens, dark theme, ThemeManager) | In progress |
+| 8C-8I | Premium PySide6 GUI (widgets, pages, polish) | Not started |
 
 ## Pipeline
 
