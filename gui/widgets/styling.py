@@ -231,6 +231,163 @@ def progress_chunk_qss(
 """.strip()
 
 
+def toggle_switch_qss(
+    colors: ColorsLike,
+    *,
+    accent: str,
+    checked: bool,
+    track_radius: int,
+    knob_radius: int,
+    selector: str,
+    knob_selector: str,
+) -> str:
+    """Return QSS for a toggle switch track + knob.
+
+    The knob is a child QFrame positioned by the widget (its x moves via a
+    plain float animation); this only styles the track fill/border and the
+    knob shape/color. No graphics effect is used.
+
+    Args:
+        colors: Duck-typed color tokens.
+        accent: Accent role (``blue``/``cyan``/``purple``).
+        checked: Whether the switch is on (accent track) or off (surface).
+        track_radius: Track corner radius in pixels.
+        knob_radius: Knob corner radius in pixels.
+        selector: Selector for the track frame.
+        knob_selector: Selector for the knob frame.
+
+    Raises:
+        KeyError: If ``accent`` is not a known accent role.
+    """
+    accent_c = accent_color(colors, accent)
+    track_bg = accent_c if checked else colors.surface_overlay
+    track_border = accent_c if checked else colors.border
+    return f"""
+{selector} {{
+    background-color: {track_bg};
+    border: 1px solid {track_border};
+    border-radius: {track_radius}px;
+}}
+{knob_selector} {{
+    background-color: {colors.text_primary};
+    border: none;
+    border-radius: {knob_radius}px;
+}}
+""".strip()
+
+
+def toggle_focus_qss(colors: ColorsLike, *, selector: str) -> str:
+    """Return QSS adding the neon focus ring to a toggle track on focus."""
+    return f"""
+{selector}:focus {{
+    border: 1px solid {colors.focus_ring};
+}}
+""".strip()
+
+
+def checkbox_qss(
+    colors: ColorsLike,
+    *,
+    accent: str,
+    box: int,
+    radius: int,
+    spacing: int,
+    selector: str,
+) -> str:
+    """Return QSS for a checkbox (indicator + label text).
+
+    Args:
+        colors: Duck-typed color tokens.
+        accent: Accent role used for the checked indicator fill.
+        box: Indicator side length in pixels.
+        radius: Indicator corner radius in pixels.
+        spacing: Gap between the indicator and the label in pixels.
+        selector: Selector for the inner QCheckBox.
+
+    Raises:
+        KeyError: If ``accent`` is not a known accent role.
+    """
+    accent_c = accent_color(colors, accent)
+    return f"""
+{selector} {{
+    color: {colors.text_primary};
+    background: transparent;
+    spacing: {spacing}px;
+}}
+{selector}::indicator {{
+    width: {box}px;
+    height: {box}px;
+    border: 1px solid {colors.border};
+    border-radius: {radius}px;
+    background-color: {colors.surface_overlay};
+}}
+{selector}::indicator:hover {{
+    border: 1px solid {accent_c};
+}}
+{selector}::indicator:checked {{
+    background-color: {accent_c};
+    border: 1px solid {accent_c};
+}}
+{selector}:focus {{
+    color: {colors.text_primary};
+}}
+{selector}::indicator:focus {{
+    border: 1px solid {colors.focus_ring};
+}}
+{selector}:disabled {{
+    color: {colors.text_disabled};
+}}
+{selector}::indicator:disabled {{
+    border: 1px solid {colors.divider};
+    background-color: {colors.surface};
+}}
+""".strip()
+
+
+def text_field_qss(
+    colors: ColorsLike,
+    *,
+    radius: int,
+    pad_v: int,
+    pad_h: int,
+    height: int,
+    selector: str,
+) -> str:
+    """Return QSS for a single-line text field (inner QLineEdit).
+
+    Args:
+        colors: Duck-typed color tokens.
+        radius: Corner radius in pixels.
+        pad_v: Vertical padding in pixels.
+        pad_h: Horizontal padding in pixels.
+        height: Minimum height in pixels.
+        selector: Selector for the inner QLineEdit.
+    """
+    return f"""
+{selector} {{
+    background-color: {colors.surface_elevated};
+    color: {colors.text_primary};
+    border: 1px solid {colors.border};
+    border-radius: {radius}px;
+    padding: {pad_v}px {pad_h}px;
+    min-height: {height}px;
+    selection-background-color: {colors.accent_cyan};
+    selection-color: {colors.text_on_accent};
+}}
+{selector}:hover {{
+    border: 1px solid {colors.divider};
+}}
+{selector}:focus {{
+    border: 1px solid {colors.focus_ring};
+}}
+{selector}:disabled {{
+    color: {colors.text_disabled};
+    background-color: {colors.surface};
+    border: 1px solid {colors.divider};
+}}
+""".strip()
+
+
 def neon_button_qss(
     colors: ColorsLike,
     *,
