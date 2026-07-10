@@ -94,6 +94,12 @@ from these primitives with dummy content (token-driven margins/spacing,
 aligned rows, consistent sizing, plus hover/disabled/loading examples). It is
 not part of the application and wires no backend.
 
+**Status: verified.** The gallery launches, renders all four primitive widget
+types correctly, remains visible, and produces no QPainter warnings.
+`build_gallery(theme)` is a development-only showcase builder and is not part
+of the production application architecture; the future dashboard assembles its
+own layouts.
+
 ## Extension guidelines (authoring a new widget)
 
 Follow these steps so future widgets match the established architecture:

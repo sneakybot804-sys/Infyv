@@ -26,7 +26,7 @@ Phase 8 (the premium desktop GUI) has started with Phase 8A, the Qt-free
 | 8A | Qt-free `gui_core` application layer | Done (verified: 219 passed) |
 | 8B | Theme foundation (tokens, dark theme, ThemeManager) | Done (verified) |
 | 8C-1 | Widget infrastructure (base, styling, animation, effects) | Done (verified) |
-| 8C-2 | Primitive widgets (GlassCard, NeonButton, IconButton, SectionHeader) | In progress |
+| 8C-2 | Primitive widgets (GlassCard, NeonButton, IconButton, SectionHeader) | In progress (widgets + verified component-gallery preview) |
 | 8C-3..8C-6 / 8D-8I | Remaining widgets, pages, polish | Not started |
 
 ## Pipeline

@@ -130,39 +130,10 @@ def build_gallery(theme) -> "QWidget":
     return window
 
 
-def _debug_checkpoint(window, label: str) -> None:
-    """TEMPORARY: log widget counts / visibility / effects at a checkpoint."""
-    from gui.widgets import GlassCard, IconButton, NeonButton, SectionHeader
-
-    from PySide6.QtWidgets import QWidget
-
-    print(f"[gallery] checkpoint {label}")
-    for widget_type in (GlassCard, NeonButton, IconButton, SectionHeader):
-        found = window.findChildren(widget_type)
-        print(f"[gallery]   {widget_type.__name__}: count={len(found)}")
-        for i, w in enumerate(found):
-            has_effect = w.graphicsEffect() is not None
-            print(
-                f"[gallery]     #{i} visible={w.isVisible()} "
-                f"effect={has_effect}"
-            )
-    # Per-card content inspection (reparent/GC/emptying).
-    for i, card in enumerate(window.findChildren(GlassCard)):
-        content = card.content()
-        if content is None:
-            print(f"[gallery]   GlassCard#{i} content=None")
-        else:
-            print(
-                f"[gallery]   GlassCard#{i} content_visible={content.isVisible()} "
-                f"content_children={len(content.findChildren(QWidget))}"
-            )
-
-
 def main() -> int:
     """Launch the themed component gallery and run the Qt event loop."""
     configure_high_dpi()
 
-    from PySide6.QtCore import QTimer
     from PySide6.QtWidgets import QApplication
 
     from gui.theme.manager import ThemeManager
@@ -173,16 +144,7 @@ def main() -> int:
     theme.apply(app)
 
     window = build_gallery(theme)
-    print("[gallery] build_gallery() returned")
     window.show()
-    print("[gallery] show() called")
-
-    # TEMPORARY checkpoints to trace the disappearance (remove after diagnosis).
-    QTimer.singleShot(0, lambda: _debug_checkpoint(window, "t=0ms"))
-    QTimer.singleShot(500, lambda: _debug_checkpoint(window, "t=500ms"))
-    QTimer.singleShot(1500, lambda: _debug_checkpoint(window, "t=1500ms"))
-    QTimer.singleShot(3000, lambda: _debug_checkpoint(window, "t=3000ms"))
-
     return app.exec()
 
 
