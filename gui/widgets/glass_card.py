@@ -17,6 +17,18 @@ from gui.theme.manager import ThemeManager
 from gui.widgets import styling
 from gui.widgets.base import ThemedWidget
 
+# TEMPORARY debug instrumentation flag (Phase 8C-2 investigation). Remove once
+# the widget-disappearance cause is confirmed.
+_DEBUG = True
+_CARD_SEQ = [0]
+
+
+def _dbg(msg: str) -> None:
+    """Temporary debug print (gated by _DEBUG)."""
+    if _DEBUG:
+        print(f"[GlassCard] {msg}")
+
+
 _SHADOW_BY_LEVEL = {
     "low": "low",
     "medium": "medium",
@@ -54,6 +66,12 @@ class GlassCard(ThemedWidget):
         self._elevation_level = elevation
         self._animated = animated
         self._content: Optional[QWidget] = None
+
+        _CARD_SEQ[0] += 1
+        self._dbg_id = _CARD_SEQ[0]
+        self._dbg_paints = 0
+        _dbg(f"construct #{self._dbg_id} glow={glow} elevation={elevation}")
+        self.destroyed.connect(lambda: _dbg(f"destroyed #{self._dbg_id}"))
 
         self._frame = QFrame(self)
         self._frame.setObjectName("GlassCard")
@@ -226,6 +244,31 @@ class GlassCard(ThemedWidget):
     # ------------------------------------------------------------------ #
     # Behaviour
     # ------------------------------------------------------------------ #
+    def showEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        """TEMPORARY: log show lifecycle (no behavior change)."""
+        _dbg(
+            f"showEvent #{self._dbg_id} visible={self.isVisible()} "
+            f"frame_effect={self._frame.graphicsEffect() is not None} "
+            f"self_effect={self.graphicsEffect() is not None} "
+            f"children={len(self.findChildren(QWidget))}"
+        )
+        super().showEvent(event)
+
+    def hideEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        """TEMPORARY: log hide lifecycle to catch unexpected hides."""
+        _dbg(f"hideEvent #{self._dbg_id} (widget being hidden)")
+        super().hideEvent(event)
+
+    def paintEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        """TEMPORARY: log the first few paints."""
+        if self._dbg_paints < 3:
+            self._dbg_paints += 1
+            _dbg(
+                f"paintEvent #{self._dbg_id} n={self._dbg_paints} "
+                f"visible={self.isVisible()}"
+            )
+        super().paintEvent(event)
+
     # TEMPORARY (Phase 8C-2): the previous show-time fade-in installed a
     # QGraphicsOpacityEffect on the card starting at opacity 0.0. Because the
     # card is also an effect-bearing widget, that transient opacity effect
