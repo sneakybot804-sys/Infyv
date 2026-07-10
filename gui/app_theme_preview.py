@@ -2,8 +2,9 @@
 
 This is **not** part of the application. It creates a QApplication, applies
 the active (dark) theme via :class:`~gui.theme.manager.ThemeManager`, and
-shows a minimal showcase built ONLY from the Phase 8C-2 primitive widgets
-(GlassCard, NeonButton, IconButton, SectionHeader) with dummy content.
+shows a minimal showcase built from the reusable widget library (Phase 8C-2
+primitives plus the 8C-3 information, 8C-4 interactive and 8C-5 advanced
+interactive widgets) with dummy content.
 
 Run with:
 
@@ -55,7 +56,21 @@ def build_gallery(theme) -> "QWidget":
     """
     from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
-    from gui.widgets import IconButton, NeonButton, SectionHeader
+    from gui.widgets import (
+        Checkbox,
+        Dropdown,
+        IconButton,
+        MetaLabel,
+        NeonButton,
+        ProgressBar,
+        SectionHeader,
+        SegmentedControl,
+        Slider,
+        StatBlock,
+        StatusBadge,
+        TextField,
+        ToggleSwitch,
+    )
 
     tokens = theme.tokens
 
@@ -124,6 +139,80 @@ def build_gallery(theme) -> "QWidget":
     states.addStretch(1)
     root.addWidget(
         _labeled_card(theme, "States", "Disabled and loading", None, states)
+    )
+
+    # ---- Phase 8C-3: information / progress widgets ----
+    info = QHBoxLayout()
+    info.setSpacing(tokens.spacing.md)
+    info.addWidget(StatusBadge(theme, "Ready", status="success"))
+    info.addWidget(StatusBadge(theme, "Running", status="info"))
+    info.addWidget(StatusBadge(theme, "Warning", status="warning"))
+    info.addWidget(StatusBadge(theme, "Error", status="error"))
+    info.addWidget(MetaLabel(theme, "Metadata label", role="secondary"))
+    info.addStretch(1)
+    root.addWidget(
+        _labeled_card(theme, "Status & Text", "StatusBadge / MetaLabel", None, info)
+    )
+
+    progress = QHBoxLayout()
+    progress.setSpacing(tokens.spacing.md)
+    determinate = ProgressBar(theme, value=0.65, accent="cyan")
+    determinate.setFixedWidth(theme.tokens.spacing.xxl * 6)
+    indeterminate = ProgressBar(theme, indeterminate=True, accent="purple")
+    indeterminate.setFixedWidth(theme.tokens.spacing.xxl * 6)
+    progress.addWidget(determinate)
+    progress.addWidget(indeterminate)
+    progress.addWidget(StatBlock(theme, "Scenes", "42", subtitle="detected"))
+    progress.addWidget(StatBlock(theme, "Duration", "12:04"))
+    progress.addStretch(1)
+    root.addWidget(
+        _labeled_card(theme, "Progress & Stats", "ProgressBar / StatBlock", None, progress)
+    )
+
+    # ---- Phase 8C-4: interactive widgets ----
+    interactive = QHBoxLayout()
+    interactive.setSpacing(tokens.spacing.md)
+    interactive.addWidget(ToggleSwitch(theme, checked=True, accent="cyan"))
+    interactive.addWidget(ToggleSwitch(theme, checked=False, accent="purple"))
+    interactive.addWidget(Checkbox(theme, "Enable subtitles", checked=True))
+    interactive.addWidget(Checkbox(theme, "Loop", accent="blue"))
+    field = TextField(theme, text="my_clip", placeholder="Output name")
+    field.setFixedWidth(theme.tokens.spacing.xxl * 6)
+    interactive.addWidget(field)
+    interactive.addStretch(1)
+    root.addWidget(
+        _labeled_card(
+            theme,
+            "Interactive",
+            "ToggleSwitch / Checkbox / TextField",
+            None,
+            interactive,
+        )
+    )
+
+    # ---- Phase 8C-5: advanced interactive widgets ----
+    advanced = QHBoxLayout()
+    advanced.setSpacing(tokens.spacing.md)
+    dropdown = Dropdown(
+        theme, items=["720p", "1080p", "1440p", "4K"], current=1, accent="cyan"
+    )
+    dropdown.setFixedWidth(theme.tokens.spacing.xxl * 5)
+    advanced.addWidget(dropdown)
+    slider = Slider(theme, minimum=0.0, maximum=1.0, value=0.5, accent="purple")
+    slider.setFixedWidth(theme.tokens.spacing.xxl * 6)
+    advanced.addWidget(slider)
+    advanced.addWidget(
+        SegmentedControl(theme, ["Day", "Week", "Month"], current=1, accent="blue")
+    )
+    advanced.addStretch(1)
+    root.addWidget(
+        _labeled_card(
+            theme,
+            "Advanced",
+            "Dropdown / Slider / SegmentedControl",
+            None,
+            advanced,
+        )
     )
 
     root.addStretch(1)
