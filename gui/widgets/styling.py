@@ -153,6 +153,84 @@ def divider_qss(colors: ColorsLike, *, selector: str) -> str:
 """.strip()
 
 
+_STATUS_FILL = {
+    "neutral": "surface_overlay",
+    "info": "accent_blue",
+    "success": "success",
+    "warning": "warning",
+    "error": "error",
+}
+
+
+def status_badge_qss(
+    colors: ColorsLike,
+    *,
+    status: str,
+    radius: int,
+    pad_v: int,
+    pad_h: int,
+    selector: str,
+) -> str:
+    """Return QSS for a status pill (status fill + on-accent text).
+
+    Args:
+        colors: Duck-typed color tokens (``ThemeManager.tokens.colors``).
+        status: One of ``neutral``, ``info``, ``success``, ``warning``,
+            ``error``.
+        radius: Corner radius in pixels (from a radius token).
+        pad_v: Vertical padding in pixels.
+        pad_h: Horizontal padding in pixels.
+        selector: The Qt selector to scope the rules to.
+
+    Raises:
+        KeyError: If ``status`` is not a known status role. The public widget
+            validates and raises ``ValueError`` before reaching this builder;
+            this guards against internal misuse.
+    """
+    fill = getattr(colors, _STATUS_FILL[status])
+    text = colors.text_primary if status == "neutral" else colors.text_on_accent
+    return f"""
+{selector} {{
+    background-color: {fill};
+    color: {text};
+    border-radius: {radius}px;
+    padding: {pad_v}px {pad_h}px;
+}}
+""".strip()
+
+
+def progress_track_qss(
+    colors: ColorsLike, *, radius: int, height: int, selector: str
+) -> str:
+    """Return QSS for a progress bar's background track."""
+    return f"""
+{selector} {{
+    background-color: {colors.surface_overlay};
+    border: 1px solid {colors.border};
+    border-radius: {radius}px;
+    min-height: {height}px;
+    max-height: {height}px;
+}}
+""".strip()
+
+
+def progress_chunk_qss(
+    colors: ColorsLike, *, accent: str, radius: int, selector: str
+) -> str:
+    """Return QSS for a progress bar's filled chunk (accent fill).
+
+    Raises:
+        KeyError: If ``accent`` is not a known accent role.
+    """
+    accent_c = accent_color(colors, accent)
+    return f"""
+{selector} {{
+    background-color: {accent_c};
+    border-radius: {radius}px;
+}}
+""".strip()
+
+
 def neon_button_qss(
     colors: ColorsLike,
     *,
