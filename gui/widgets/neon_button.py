@@ -70,12 +70,19 @@ class NeonButton(ThemedWidget):
         self.setAccessibleName(text or "button")
         self.apply_theme()
 
-    # Hover / pressed / disabled feedback is provided by the QSS state rules
-    # in ``neon_button_qss`` (``:hover`` / ``:pressed`` / ``:disabled``). No
-    # QGraphicsEffect is used on the button: a graphics effect here would be
-    # nested inside GlassCard's drop-shadow effect source tree, which Qt
-    # cannot render (it causes 'Painter not active' warnings and blank
-    # cards).
+    # TEMPORARY implementation detail (Phase 8C-2): hover/pressed/disabled
+    # feedback is provided only by the QSS state rules in ``neon_button_qss``
+    # (``:hover`` / ``:pressed`` / ``:disabled``). The previous animated
+    # QGraphicsOpacityEffect was removed because a graphics effect here nests
+    # inside GlassCard's drop-shadow effect source tree, which Qt cannot
+    # render (it caused 'Painter not active' warnings and blank cards).
+    #
+    # This is intentionally minimal, not a redesign. Richer hover/press
+    # animation can be restored later using a rendering-safe approach that
+    # does NOT nest a QGraphicsEffect inside another effect -- e.g. animating
+    # a QSS-driven property (custom Q_PROPERTY + dynamic stylesheet) or a
+    # color/geometry tween on the inner button. The public API is unchanged,
+    # so that restoration will not affect callers.
 
     # ------------------------------------------------------------------ #
     # Public API

@@ -128,3 +128,22 @@ Follow these steps so future widgets match the established architecture:
 After 8C-2, the public API of GlassCard, NeonButton, IconButton and
 SectionHeader is considered stable and should not change unless a bug is
 found.
+
+## Temporary implementation detail: NeonButton hover animation
+
+A `QGraphicsEffect` cannot be nested inside another effect's source tree:
+when a `NeonButton` carrying a `QGraphicsOpacityEffect` sits inside a
+`GlassCard` (which uses a `QGraphicsDropShadowEffect`), Qt fails to render the
+card to its offscreen pixmap and prints 'Painter not active' warnings, leaving
+the card blank.
+
+As a **temporary** measure, NeonButton's animated opacity effect was removed;
+hover/pressed/disabled feedback now comes from QSS state rules only. This
+keeps the public API unchanged and the gallery rendering correctly with no
+QPainter warnings.
+
+**Planned restoration:** reintroduce richer hover/press animation using a
+rendering-safe approach that does not nest graphics effects -- for example an
+animated custom `Q_PROPERTY` driving a dynamic stylesheet, or a color/geometry
+tween on the inner button. Because the public API is stable, this change will
+be internal only.

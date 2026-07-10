@@ -47,24 +47,16 @@ def _labeled_card(theme, title, subtitle, badge, body_layout):
     return card
 
 
-def main() -> int:
-    """Launch the themed component gallery and run the Qt event loop."""
-    configure_high_dpi()
+def build_gallery(theme) -> "QWidget":
+    """Build and return the component-gallery window for ``theme``.
 
-    from PySide6.QtWidgets import (
-        QApplication,
-        QHBoxLayout,
-        QVBoxLayout,
-        QWidget,
-    )
+    Extracted from :func:`main` so the widget tree can be constructed (and
+    asserted) headlessly in tests without running the Qt event loop.
+    """
+    from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
-    from gui.theme.manager import ThemeManager
     from gui.widgets import IconButton, NeonButton, SectionHeader
 
-    app = QApplication(sys.argv)
-
-    theme = ThemeManager()
-    theme.apply(app)
     tokens = theme.tokens
 
     window = QWidget()
@@ -135,6 +127,23 @@ def main() -> int:
     )
 
     root.addStretch(1)
+    return window
+
+
+def main() -> int:
+    """Launch the themed component gallery and run the Qt event loop."""
+    configure_high_dpi()
+
+    from PySide6.QtWidgets import QApplication
+
+    from gui.theme.manager import ThemeManager
+
+    app = QApplication(sys.argv)
+
+    theme = ThemeManager()
+    theme.apply(app)
+
+    window = build_gallery(theme)
     window.show()
     return app.exec()
 
