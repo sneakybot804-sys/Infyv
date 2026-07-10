@@ -15,7 +15,6 @@ from PySide6.QtWidgets import QFrame, QGraphicsDropShadowEffect, QVBoxLayout, QW
 
 from gui.theme.manager import ThemeManager
 from gui.widgets import styling
-from gui.widgets.animation import fade
 from gui.widgets.base import ThemedWidget
 
 _SHADOW_BY_LEVEL = {
@@ -55,7 +54,6 @@ class GlassCard(ThemedWidget):
         self._elevation_level = elevation
         self._animated = animated
         self._content: Optional[QWidget] = None
-        self._did_fade_in = False
 
         self._frame = QFrame(self)
         self._frame.setObjectName("GlassCard")
@@ -228,16 +226,14 @@ class GlassCard(ThemedWidget):
     # ------------------------------------------------------------------ #
     # Behaviour
     # ------------------------------------------------------------------ #
-    def showEvent(self, event) -> None:  # noqa: N802 (Qt override)
-        """Fade the card in on first show when animations are enabled."""
-        super().showEvent(event)
-        if self._animated and not self._did_fade_in:
-            self._did_fade_in = True
-            fade(
-                self,
-                0.0,
-                1.0,
-                duration_ms=self._theme.duration("normal"),
-                easing=self._theme.easing(),
-                animated=self._animated,
-            )
+    # TEMPORARY (Phase 8C-2): the previous show-time fade-in installed a
+    # QGraphicsOpacityEffect on the card starting at opacity 0.0. Because the
+    # card is also an effect-bearing widget, that transient opacity effect
+    # left the card in a transparent/stale state once the animation was torn
+    # down, so content appeared briefly then vanished. The fade-in is removed
+    # so the card renders at full opacity immediately and stays visible.
+    #
+    # A rendering-safe entrance animation (one that does not stack an opacity
+    # effect on an effect-bearing card) will be revisited in Phase 8H
+    # (Animation & Polish). The `animated` flag still governs the hover glow
+    # transition, so the public API is unchanged.
