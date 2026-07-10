@@ -388,6 +388,178 @@ def text_field_qss(
 """.strip()
 
 
+def dropdown_qss(
+    colors: ColorsLike,
+    *,
+    accent: str,
+    radius: int,
+    pad_v: int,
+    pad_h: int,
+    height: int,
+    selector: str,
+) -> str:
+    """Return QSS for a Dropdown's inner QComboBox and its popup view.
+
+    Args:
+        colors: Duck-typed color tokens.
+        accent: Accent role (``blue``/``cyan``/``purple``) for hover/focus.
+        radius: Corner radius in pixels.
+        pad_v: Vertical padding in pixels.
+        pad_h: Horizontal padding in pixels.
+        height: Minimum height in pixels.
+        selector: Selector for the inner QComboBox.
+
+    Raises:
+        KeyError: If ``accent`` is not a known accent role.
+    """
+    accent_c = accent_color(colors, accent)
+    return f"""
+{selector} {{
+    background-color: {colors.surface_elevated};
+    color: {colors.text_primary};
+    border: 1px solid {colors.border};
+    border-radius: {radius}px;
+    padding: {pad_v}px {pad_h}px;
+    min-height: {height}px;
+}}
+{selector}:hover {{
+    border: 1px solid {accent_c};
+}}
+{selector}:focus {{
+    border: 1px solid {colors.focus_ring};
+}}
+{selector}:disabled {{
+    color: {colors.text_disabled};
+    background-color: {colors.surface};
+    border: 1px solid {colors.divider};
+}}
+{selector}::drop-down {{
+    border: none;
+    width: {height}px;
+}}
+{selector} QAbstractItemView {{
+    background-color: {colors.surface_elevated};
+    color: {colors.text_primary};
+    border: 1px solid {colors.border};
+    border-radius: {radius}px;
+    selection-background-color: {accent_c};
+    selection-color: {colors.text_on_accent};
+    outline: none;
+}}
+""".strip()
+
+
+def slider_qss(
+    colors: ColorsLike,
+    *,
+    accent: str,
+    groove: int,
+    handle: int,
+    radius: int,
+    selector: str,
+) -> str:
+    """Return QSS for a Slider's inner horizontal QSlider.
+
+    Args:
+        colors: Duck-typed color tokens.
+        accent: Accent role for the filled sub-page and handle.
+        groove: Groove thickness in pixels.
+        handle: Handle side length in pixels.
+        radius: Corner radius in pixels.
+        selector: Selector for the inner QSlider.
+
+    Raises:
+        KeyError: If ``accent`` is not a known accent role.
+    """
+    accent_c = accent_color(colors, accent)
+    handle_margin = -(max(0, (handle - groove)) // 2)
+    return f"""
+{selector}::groove:horizontal {{
+    background-color: {colors.surface_overlay};
+    border: 1px solid {colors.border};
+    height: {groove}px;
+    border-radius: {radius}px;
+}}
+{selector}::sub-page:horizontal {{
+    background-color: {accent_c};
+    border-radius: {radius}px;
+}}
+{selector}::handle:horizontal {{
+    background-color: {colors.text_primary};
+    border: 1px solid {accent_c};
+    width: {handle}px;
+    height: {handle}px;
+    margin: {handle_margin}px 0;
+    border-radius: {handle // 2}px;
+}}
+{selector}:focus {{
+    border: none;
+}}
+{selector}::handle:horizontal:focus {{
+    border: 1px solid {colors.focus_ring};
+}}
+{selector}:disabled {{
+    background: transparent;
+}}
+{selector}::sub-page:horizontal:disabled {{
+    background-color: {colors.divider};
+}}
+""".strip()
+
+
+def segmented_control_qss(
+    colors: ColorsLike,
+    *,
+    accent: str,
+    radius: int,
+    pad_v: int,
+    pad_h: int,
+    selector: str,
+) -> str:
+    """Return QSS for a SegmentedControl's inner exclusive QPushButtons.
+
+    The selected segment uses the accent fill; unselected segments use the
+    elevated surface. Focus shows the neon ring on the focused segment.
+
+    Args:
+        colors: Duck-typed color tokens.
+        accent: Accent role for the checked/selected segment.
+        radius: Corner radius in pixels.
+        pad_v: Vertical padding in pixels.
+        pad_h: Horizontal padding in pixels.
+        selector: Selector for the segment QPushButtons.
+
+    Raises:
+        KeyError: If ``accent`` is not a known accent role.
+    """
+    accent_c = accent_color(colors, accent)
+    return f"""
+{selector} {{
+    background-color: {colors.surface_elevated};
+    color: {colors.text_primary};
+    border: 1px solid {colors.border};
+    border-radius: {radius}px;
+    padding: {pad_v}px {pad_h}px;
+}}
+{selector}:hover {{
+    border: 1px solid {accent_c};
+}}
+{selector}:checked {{
+    background-color: {accent_c};
+    color: {colors.text_on_accent};
+    border: 1px solid {accent_c};
+}}
+{selector}:focus {{
+    border: 1px solid {colors.focus_ring};
+}}
+{selector}:disabled {{
+    color: {colors.text_disabled};
+    background-color: {colors.surface};
+    border: 1px solid {colors.divider};
+}}
+""".strip()
+
+
 def neon_button_qss(
     colors: ColorsLike,
     *,
