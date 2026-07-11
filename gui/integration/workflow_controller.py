@@ -28,7 +28,19 @@ from typing import Dict, List, Optional
 
 from PySide6.QtCore import QObject, Qt, Signal
 
-from gui.integration.facade_controller import FacadeController  # noqa: E501
+from gui.integration.facade_controller import FacadeController
+from gui.integration.phase_worker import PhaseWorker
+from gui_core import (
+    ApplicationFacade,
+    ArtifactInfo,
+    Event,
+    EventMessage,
+    LogRecord,
+    PhasePlugin,
+    PhaseResult,
+    ProjectState,
+)
+from gui_core.logs import LogLevel
 
 
 class _ArtifactBridge(QObject):
@@ -44,18 +56,6 @@ class _ArtifactBridge(QObject):
     """
 
     received = Signal(object)
-from gui.integration.phase_worker import PhaseWorker
-from gui_core import (
-    ApplicationFacade,
-    ArtifactInfo,
-    Event,
-    EventMessage,
-    LogRecord,
-    PhasePlugin,
-    PhaseResult,
-    ProjectState,
-)
-from gui_core.logs import LogLevel
 
 
 class WorkflowController(QObject):
