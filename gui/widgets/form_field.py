@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtWidgets import QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from gui.theme.manager import ThemeManager
 from gui.widgets import styling
@@ -75,11 +75,19 @@ class FormField(ThemedWidget):
         self._column = QVBoxLayout(self)
         self._column.setContentsMargins(0, 0, 0, 0)
 
-        # Composed themed labels: label (secondary caption), helper (muted
-        # caption), error (error-colored caption, hidden until set).
+        # Composed themed labels: label (secondary caption) and helper (muted
+        # caption) are MetaLabels that self-style. The error row is a plain
+        # QLabel owned and colored directly by this widget: it must be styled
+        # with the error color, and a MetaLabel would re-apply its own role
+        # color to the shared '#MetaLabel' selector on every theme change
+        # (subscriber order is undefined), overwriting the error tint. Owning
+        # a QLabel here keeps the error color under FormField.apply_theme()
+        # exclusively, so it survives theme changes.
         self._label = MetaLabel(theme, self._display_label(), role="secondary", style="caption")
         self._helper = MetaLabel(theme, helper, role="muted", style="caption")
-        self._error_label = MetaLabel(theme, "", role="muted", style="caption")
+        self._error_label = QLabel("", self)
+        self._error_label.setObjectName("FormFieldError")
+        self._error_label.setWordWrap(True)
 
         control.setParent(self)
         self._column.addWidget(self._label)
@@ -172,7 +180,7 @@ class FormField(ThemedWidget):
         color. Passing ``None`` clears the error and restores the helper row.
         """
         self._error = message if message else None
-        self._error_label.set_text(self._error or "")
+        self._error_label.setText(self._error or "")
         self._sync_error_visibility()
         self._sync_helper_visibility()
         self._refresh_accessible_name()
@@ -186,11 +194,16 @@ class FormField(ThemedWidget):
     # Theming
     # ------------------------------------------------------------------ #
     def apply_theme(self) -> None:
-        """Apply spacing and the error text color (composed labels self-style)."""
+        """Apply spacing, the error font and the error text color.
+
+        The label and helper are MetaLabels that restyle themselves. The error
+        QLabel is owned here, so its font and error color are (re)applied on
+        every theme change without any competing subscriber, which is what
+        makes the error tint survive a theme change.
+        """
         self._apply_spacing()
         colors = self.tokens.colors
-        # The error MetaLabel styles itself with its muted role; override its
-        # inner label color to the error color via the shared builder.
+        self._error_label.setFont(self._theme.font("caption"))
         self._error_label.setStyleSheet(
-            styling.label_color_qss(colors.error, selector="#MetaLabel")
+            styling.label_color_qss(colors.error, selector="#FormFieldError")
         )
