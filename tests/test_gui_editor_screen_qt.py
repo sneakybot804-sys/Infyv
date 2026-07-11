@@ -100,21 +100,17 @@ def test_status_and_progress_not_wrapped_in_form_field(theme):
 
 
 def test_only_public_builder_is_exposed():
-    public = [n for n in vars(editor_screen) if not n.startswith("_")]
-    # Only the builder plus imported symbols; assert no extra public helper
-    # functions (helpers must be private).
-    helpers = [
+    # The only public callable *defined in* this module (i.e. excluding
+    # imported widget classes, which originate from other modules) must be
+    # build_editor_screen; every helper is private.
+    public_funcs = [
         n
         for n, v in vars(editor_screen).items()
-        if callable(v) and not n.startswith("_") and n != "build_editor_screen"
+        if callable(v)
+        and not n.startswith("_")
+        and getattr(v, "__module__", "") == editor_screen.__name__
     ]
-    # Imported widget classes are callable; exclude them by module origin.
-    local_helpers = [
-        n
-        for n in helpers
-        if getattr(vars(editor_screen)[n], "__module__", "") == editor_screen.__name__
-    ]
-    assert local_helpers == ["build_editor_screen"]
+    assert public_funcs == ["build_editor_screen"]
 
 
 def test_no_graphics_effect_on_form_composites(theme):
