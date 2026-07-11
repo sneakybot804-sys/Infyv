@@ -70,6 +70,7 @@ class WorkflowController(QObject):
         self._facade = facade
         self._reader = FacadeController(facade)
         self._worker: Optional[PhaseWorker] = None
+        self._connected_worker: Optional[PhaseWorker] = None
         self._phase_running = False
         self._exec_unsubscribes: List = []
 
@@ -86,12 +87,19 @@ class WorkflowController(QObject):
         self._reader.start()
 
     def stop(self) -> None:
-        """Stop synchronization and ensure any running phase is torn down."""
+        """Stop synchronization and ensure any running phase is torn down.
+
+        Idempotent: safe to call repeatedly and before any run. Releases the
+        run-scoped bus subscription, joins the worker thread, disconnects the
+        worker's signals before dropping the reference (so no queued delivery
+        can outlive it), and stops read-only synchronization.
+        """
         for unsubscribe in self._exec_unsubscribes:
             unsubscribe()
         self._exec_unsubscribes.clear()
         if self._worker is not None:
             self._worker.wait()
+            self._disconnect_worker(self._worker)
             self._worker = None
         self._phase_running = False
         self._reader.stop()
@@ -176,6 +184,7 @@ class WorkflowController(QObject):
         worker.finished.connect(self._on_phase_finished, Qt.ConnectionType.QueuedConnection)
         worker.failed.connect(self._on_phase_failed, Qt.ConnectionType.QueuedConnection)
         worker.done.connect(self._on_phase_done, Qt.ConnectionType.QueuedConnection)
+        self._connected_worker = worker
 
         self.phase_started.emit(phase_id)
         worker.start()
@@ -197,12 +206,34 @@ class WorkflowController(QObject):
         self.phase_failed.emit(message)
 
     def _on_phase_done(self) -> None:
-        """Clear single-flight state and release run-scoped subscriptions."""
+        """Clear single-flight state and release run-scoped subscriptions.
+
+        Disconnects the worker's signals before dropping the reference so no
+        queued delivery can fire after the worker is gone. Idempotent.
+        """
         for unsubscribe in self._exec_unsubscribes:
             unsubscribe()
         self._exec_unsubscribes.clear()
+        if self._worker is not None:
+            self._disconnect_worker(self._worker)
         self._worker = None
         self._phase_running = False
+
+    def _disconnect_worker(self, worker: PhaseWorker) -> None:
+        """Disconnect this controller's slots from ``worker`` (idempotent)."""
+        if self._connected_worker is not worker:
+            return
+        for signal, slot in (
+            (worker.finished, self._on_phase_finished),
+            (worker.failed, self._on_phase_failed),
+            (worker.done, self._on_phase_done),
+        ):
+            try:
+                signal.disconnect(slot)
+            except (RuntimeError, TypeError):
+                # Already disconnected or underlying C++ object gone.
+                pass
+        self._connected_worker = None
 
     def _on_artifact_created(self, message: EventMessage) -> None:
         """Re-emit an ArtifactCreated bus event as a Qt signal."""

@@ -70,6 +70,9 @@ class PhaseWorker(QObject):
         # object is scheduled for deletion, so a later wait()/stop() never
         # touches a destroyed QThread. Order matters: _clear_thread runs first.
         thread.finished.connect(self._clear_thread)
+        # End the worker QObject's lifetime with its thread so it cannot linger
+        # with affinity to a destroyed QThread across later event-loop pumps.
+        thread.finished.connect(self.deleteLater)
         thread.finished.connect(thread.deleteLater)
         thread.start()
 
