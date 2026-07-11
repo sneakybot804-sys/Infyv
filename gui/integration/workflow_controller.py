@@ -28,7 +28,22 @@ from typing import Dict, List, Optional
 
 from PySide6.QtCore import QObject, Qt, Signal
 
-from gui.integration.facade_controller import FacadeController
+from gui.integration.facade_controller import FacadeController  # noqa: E501
+
+
+class _ArtifactBridge(QObject):
+    """Private Qt bridge marshaling a bus callback onto the GUI thread.
+
+    The gui_core event bus is synchronous and framework-agnostic: it invokes
+    subscribers inline on the publishing thread. During a phase run that
+    thread is the worker thread, so the ArtifactCreated callback must not
+    touch a GUI-thread QObject directly. This bridge lives on the GUI thread;
+    the worker-thread callback only ``emit``s :attr:`received`, and a queued
+    connection guarantees the connected slot runs on the GUI thread before any
+    public signal is emitted.
+    """
+
+    received = Signal(object)
 from gui.integration.phase_worker import PhaseWorker
 from gui_core import (
     ApplicationFacade,
@@ -73,6 +88,13 @@ class WorkflowController(QObject):
         self._connected_worker: Optional[PhaseWorker] = None
         self._phase_running = False
         self._exec_unsubscribes: List = []
+        # GUI-thread bridge: the worker-thread ArtifactCreated bus callback
+        # emits onto this, and a queued connection re-delivers on the GUI
+        # thread before the public artifact_created signal is emitted.
+        self._artifact_bridge = _ArtifactBridge()
+        self._artifact_bridge.received.connect(
+            self._emit_artifact_created, Qt.ConnectionType.QueuedConnection
+        )
 
     # ------------------------------------------------------------------ #
     # Lifecycle
@@ -236,5 +258,13 @@ class WorkflowController(QObject):
         self._connected_worker = None
 
     def _on_artifact_created(self, message: EventMessage) -> None:
-        """Re-emit an ArtifactCreated bus event as a Qt signal."""
+        """Bus callback (may run on the worker thread).
+
+        Does not touch this GUI-thread QObject directly: it only emits the
+        bridge signal, whose queued connection re-delivers on the GUI thread.
+        """
+        self._artifact_bridge.received.emit(message)
+
+    def _emit_artifact_created(self, message: object) -> None:
+        """GUI-thread slot: emit the public artifact_created signal."""
         self.artifact_created.emit(message)
