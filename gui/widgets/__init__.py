@@ -19,6 +19,8 @@ from __future__ import annotations
 from gui.widgets.base import ThemedWidget
 from gui.widgets.checkbox import Checkbox
 from gui.widgets.dropdown import Dropdown
+from gui.widgets.form_field import FormField
+from gui.widgets.form_section import FormSection
 from gui.widgets.glass_card import GlassCard
 from gui.widgets.icon_button import IconButton
 from gui.widgets.meta_label import MetaLabel
@@ -26,6 +28,7 @@ from gui.widgets.neon_button import NeonButton
 from gui.widgets.progress_bar import ProgressBar
 from gui.widgets.section_header import SectionHeader
 from gui.widgets.segmented_control import SegmentedControl
+from gui.widgets.settings_group import SettingsGroup
 from gui.widgets.slider import Slider
 from gui.widgets.stat_block import StatBlock
 from gui.widgets.status_badge import StatusBadge
@@ -48,4 +51,7 @@ __all__ = [
     "Dropdown",
     "Slider",
     "SegmentedControl",
+    "FormField",
+    "FormSection",
+    "SettingsGroup",
 ]
