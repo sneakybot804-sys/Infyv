@@ -66,6 +66,10 @@ class PhaseWorker(QObject):
         thread.started.connect(self._run)
         # Tear the thread down once the worker signals completion.
         self.done.connect(thread.quit)
+        # When the thread finishes, drop our stale reference *before* the C++
+        # object is scheduled for deletion, so a later wait()/stop() never
+        # touches a destroyed QThread. Order matters: _clear_thread runs first.
+        thread.finished.connect(self._clear_thread)
         thread.finished.connect(thread.deleteLater)
         thread.start()
 
@@ -80,8 +84,28 @@ class PhaseWorker(QObject):
         self.finished.emit(result)
         self.done.emit()
 
+    def _clear_thread(self) -> None:
+        """Drop the QThread reference once it has finished (idempotent)."""
+        self._thread = None
+
     def wait(self) -> None:
-        """Block until the worker thread has finished (used on teardown/tests)."""
-        if self._thread is not None:
-            self._thread.quit()
-            self._thread.wait()
+        """Block until the worker thread has finished, then release it.
+
+        Safe to call when the worker is still running, has already finished, or
+        the underlying C++ QThread has already been destroyed. After this call
+        the internal reference is cleared so repeated wait()/stop() calls are
+        idempotent.
+        """
+        thread = self._thread
+        if thread is None:
+            return
+        try:
+            if thread.isRunning():
+                thread.quit()
+                thread.wait()
+        except RuntimeError:
+            # The underlying C++ QThread was already deleted (finished and
+            # deleteLater'd). Nothing to wait on; just release the reference.
+            pass
+        finally:
+            self._thread = None
