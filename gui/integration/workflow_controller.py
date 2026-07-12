@@ -120,9 +120,13 @@ class WorkflowController(QObject):
             unsubscribe()
         self._exec_unsubscribes.clear()
         if self._worker is not None:
-            self._worker.wait()
-            self._disconnect_worker(self._worker)
+            worker = self._worker
+            self._disconnect_worker(worker)
             self._worker = None
+            # Sole owner (GUI thread) joins the thread and deletes both the
+            # worker and the QThread here, so no wrapper is finalized on the
+            # worker thread concurrently with the C++ ~QThread.
+            worker.teardown()
         self._phase_running = False
         self._reader.stop()
 
@@ -236,8 +240,14 @@ class WorkflowController(QObject):
         for unsubscribe in self._exec_unsubscribes:
             unsubscribe()
         self._exec_unsubscribes.clear()
-        if self._worker is not None:
-            self._disconnect_worker(self._worker)
+        worker = self._worker
+        if worker is not None:
+            self._disconnect_worker(worker)
+            # This slot runs on the GUI thread (queued). It is the single
+            # owner responsible for the complete worker/QThread lifetime: join
+            # the finished worker thread and delete both QObjects here so every
+            # lifetime transition is serialized onto this thread.
+            worker.teardown()
         self._worker = None
         self._phase_running = False
 

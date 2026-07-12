@@ -59,22 +59,43 @@ class PhaseWorker(QObject):
     # Execution
     # ------------------------------------------------------------------ #
     def start(self) -> None:
-        """Move to a fresh QThread and begin execution."""
+        """Move to a fresh QThread and begin execution.
+
+        Teardown is intentionally NOT wired to ``thread.finished``. Destroying
+        the worker and the QThread is the exclusive responsibility of the
+        owning GUI thread (the controller's ``_on_phase_done`` / ``stop``),
+        which joins the thread before deleting either object. This guarantees
+        every lifetime transition of both wrapped QObjects happens on a single
+        thread, so the C++ ``~QThread`` can never race a worker-thread wrapper
+        deallocation. The worker thread only runs ``_run`` and Qt's own loop
+        exit.
+        """
         thread = QThread()
         self._thread = thread
         self.moveToThread(thread)
         thread.started.connect(self._run)
-        # Tear the thread down once the worker signals completion.
+        # Stop the worker event loop when the run reports completion so the
+        # owning thread can join it. No object is deleted from this thread.
         self.done.connect(thread.quit)
-        # When the thread finishes, drop our stale reference *before* the C++
-        # object is scheduled for deletion, so a later wait()/stop() never
-        # touches a destroyed QThread. Order matters: _clear_thread runs first.
-        thread.finished.connect(self._clear_thread)
-        # End the worker QObject's lifetime with its thread so it cannot linger
-        # with affinity to a destroyed QThread across later event-loop pumps.
-        thread.finished.connect(self.deleteLater)
-        thread.finished.connect(thread.deleteLater)
         thread.start()
+
+    def teardown(self) -> None:
+        """Join the worker thread and delete both QObjects on the caller thread.
+
+        Must be called on the object's owning (GUI) thread. Joins the thread
+        (via :meth:`wait`), then schedules deletion of the QThread and this
+        worker with ``deleteLater`` so both wrappers are finalized only on the
+        owning thread. Idempotent: safe to call when already torn down.
+        """
+        thread = self._thread
+        self.wait()  # joins if running; clears self._thread
+        if thread is not None:
+            try:
+                thread.deleteLater()
+            except RuntimeError:
+                # Underlying C++ QThread already gone; nothing to schedule.
+                pass
+        self.deleteLater()
 
     def _run(self) -> None:
         """Invoke the synchronous facade call and report the outcome."""
