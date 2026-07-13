@@ -556,3 +556,163 @@ def test_subthreshold_drag_behaves_as_click(theme):
     assert timeline.selected_index() == 1
     assert received == []
     assert timeline.clips() == before
+
+
+# ---------------------------------------------------------------------- #
+# Clip trim (Phase 8H, Milestone 7; start/length edge resize)
+# ---------------------------------------------------------------------- #
+def test_trim_clip_updates_only_start_and_length(theme):
+    timeline = _selectable_timeline(theme)
+    # "Intro": index 0, track 0, start 0.0, length 12.0.
+    timeline.trim_clip(0, start=2.0, length=8.0)
+    clip = timeline.clips()[0]
+    assert clip["start"] == pytest.approx(2.0)
+    assert clip["length"] == pytest.approx(8.0)
+    # Track and label are untouched.
+    assert clip["track"] == 0
+    assert clip["label"] == "Intro"
+
+
+def test_trim_clip_track_unchanged(theme):
+    timeline = _selectable_timeline(theme)
+    # "Music": index 2, track 1.
+    timeline.trim_clip(2, length=10.0)
+    assert timeline.clips()[2]["track"] == 1
+
+
+def test_trim_clip_emits_clip_trimmed_once(theme):
+    timeline = _selectable_timeline(theme)
+    received = []
+    timeline.clip_trimmed.connect(lambda i, s, ln: received.append((i, s, ln)))
+    timeline.trim_clip(0, start=1.0, length=5.0)
+    assert received == [(0, pytest.approx(1.0), pytest.approx(5.0))]
+
+
+def test_trim_clip_no_emit_when_unchanged(theme):
+    timeline = _selectable_timeline(theme)
+    received = []
+    timeline.clip_trimmed.connect(lambda i, s, ln: received.append((i, s, ln)))
+    # No arguments -> values keep their current value -> no-op.
+    timeline.trim_clip(0)
+    # Explicitly passing the current values is also a no-op.
+    timeline.trim_clip(0, start=0.0, length=12.0)
+    assert received == []
+
+
+def test_trim_clip_out_of_range_raises(theme):
+    timeline = _selectable_timeline(theme)
+    with pytest.raises(ValueError):
+        timeline.trim_clip(99, length=5.0)
+
+
+def test_trim_clip_clamps_start_non_negative(theme):
+    timeline = _selectable_timeline(theme)
+    timeline.trim_clip(0, start=-5.0)
+    assert timeline.clips()[0]["start"] == pytest.approx(0.0)
+
+
+def test_trim_clip_clamps_min_length(theme):
+    timeline = _selectable_timeline(theme)
+    timeline.trim_clip(0, length=0.2)
+    assert timeline.clips()[0]["length"] == pytest.approx(1.0)
+
+
+def test_trim_clip_clamps_within_duration(theme):
+    timeline = _selectable_timeline(theme)  # duration 60.0
+    # start 55 + length 20 = 75 > 60: keep start, shrink length to fit.
+    timeline.trim_clip(0, start=55.0, length=20.0)
+    clip = timeline.clips()[0]
+    assert clip["start"] == pytest.approx(55.0)
+    assert clip["length"] == pytest.approx(5.0)
+    assert clip["start"] + clip["length"] <= 60.0 + 1e-9
+
+
+def test_trim_clip_min_length_wins_at_end_of_timeline(theme):
+    timeline = _selectable_timeline(theme)  # duration 60.0
+    # start 59.5 + length 20 = 79.5 > 60; fit would give length 0.5 < 1.0, so
+    # length is held at 1.0 and start pulled back to 59.0.
+    timeline.trim_clip(0, start=59.5, length=20.0)
+    clip = timeline.clips()[0]
+    assert clip["length"] == pytest.approx(1.0)
+    assert clip["start"] == pytest.approx(59.0)
+
+
+def test_trim_left_edge_keeps_right_edge_fixed(theme):
+    timeline = _selectable_timeline(theme)
+    # "Intro": start 0, length 12 -> right edge at 12. Move the left edge to 3.
+    right_edge = 0.0 + 12.0
+    timeline.trim_clip(0, start=3.0, length=right_edge - 3.0)
+    clip = timeline.clips()[0]
+    assert clip["start"] == pytest.approx(3.0)
+    assert clip["start"] + clip["length"] == pytest.approx(right_edge)
+
+
+def test_trim_right_edge_keeps_left_edge_fixed(theme):
+    timeline = _selectable_timeline(theme)
+    # "Intro": start 0, length 12. Extend the right edge (length only).
+    timeline.trim_clip(0, length=15.0)
+    clip = timeline.clips()[0]
+    assert clip["start"] == pytest.approx(0.0)
+    assert clip["length"] == pytest.approx(15.0)
+
+
+def test_edge_drag_trims_and_emits_clip_trimmed(theme):
+    timeline = _selectable_timeline(theme)
+    frame = _clip_frame(timeline, "Intro")  # index 0, start 0, length 12
+    # Give the frame a real width so the width-guarded classification treats a
+    # near-left-edge press as a trim (does not depend on offscreen layout).
+    frame.resize(200, 40)
+    received = []
+    timeline.clip_trimmed.connect(lambda i, s, ln: received.append((i, s, ln)))
+    # Press near the left edge, drag right past the threshold (dx = 40px ->
+    # +5.0s at 8 px/s). Left trim holds the right edge (12.0) fixed.
+    _press(frame, QPointF(2.0, 5.0))
+    _move(frame, QPointF(42.0, 5.0))
+    _release(frame, QPointF(42.0, 5.0))
+    clip = timeline.clips()[0]
+    assert clip["start"] == pytest.approx(5.0)
+    assert clip["start"] + clip["length"] == pytest.approx(12.0)
+    assert len(received) >= 1
+    # The final emission reflects the committed start/length.
+    assert received[-1][0] == 0
+    assert received[-1][1] == pytest.approx(5.0)
+    assert received[-1][2] == pytest.approx(7.0)
+
+
+def test_is_trimming_transitions(theme):
+    timeline = _selectable_timeline(theme)
+    frame = _clip_frame(timeline, "Intro")
+    frame.resize(200, 40)
+    assert timeline.is_trimming() is False
+    _press(frame, QPointF(2.0, 5.0))
+    _move(frame, QPointF(42.0, 5.0))
+    # Mid-drag, before release, a trim is in progress.
+    assert timeline.is_trimming() is True
+    _release(frame, QPointF(42.0, 5.0))
+    assert timeline.is_trimming() is False
+
+
+def test_center_click_still_selects_after_trim_feature(theme):
+    timeline = _selectable_timeline(theme)
+    received = []
+    timeline.clip_trimmed.connect(lambda i, s, ln: received.append((i, s, ln)))
+    before = timeline.clips()
+    _left_click(_clip_frame(timeline, "Gameplay"))  # index 1
+    # M5 behavior intact: selects, no trim, model unchanged.
+    assert timeline.selected_index() == 1
+    assert received == []
+    assert timeline.clips() == before
+
+
+def test_center_drag_still_moves_after_trim_feature(theme):
+    timeline = _selectable_timeline(theme)
+    moved = []
+    trimmed = []
+    timeline.clip_moved.connect(lambda i, t: moved.append((i, t)))
+    timeline.clip_trimmed.connect(lambda i, s, ln: trimmed.append((i, s, ln)))
+    # A zero-width offscreen frame classifies as move (width guard), so the
+    # existing drag helper still performs a track move (M6), not a trim.
+    _drag_clip_to_lane(timeline, _clip_frame(timeline, "Intro"), _lane(timeline, 1))
+    assert timeline.clips()[0]["track"] == 1
+    assert moved == [(0, 1)]
+    assert trimmed == []
