@@ -1,0 +1,202 @@
+"""Offscreen Qt tests for the Phase 8H Milestone 3 Timeline widget.
+
+Covers object names, the duration/tracks/clips public API, the playhead API and
+its ``playhead_changed`` signal, clamping, and invalid-duration handling.
+Additive and independent of existing tests. Skipped when PySide6 is
+unavailable; runs under the ``offscreen`` Qt platform. No backend and no
+:mod:`gui_core` involvement.
+"""
+from __future__ import annotations
+
+import os
+
+import pytest
+
+pytest.importorskip("PySide6")
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
+
+from gui.theme.manager import ThemeManager  # noqa: E402
+from gui.widgets.timeline import Timeline  # noqa: E402
+
+
+@pytest.fixture(scope="module")
+def app():
+    application = QApplication.instance() or QApplication([])
+    yield application
+
+
+@pytest.fixture
+def theme(app):
+    manager = ThemeManager()
+    manager.apply(app)
+    return manager
+
+
+def _find(root, object_name):
+    for child in root.findChildren(QWidget):
+        if child.objectName() == object_name:
+            return child
+    return None
+
+
+def _demo_clips():
+    return [
+        {"track": 0, "start": 0.0, "length": 12.0, "label": "Intro"},
+        {"track": 0, "start": 12.0, "length": 20.0, "label": "Gameplay"},
+        {"track": 1, "start": 0.0, "length": 32.0, "label": "Music"},
+    ]
+
+
+# ---------------------------------------------------------------------- #
+# Structure / object names
+# ---------------------------------------------------------------------- #
+def test_object_names(theme):
+    timeline = Timeline(theme)
+    assert timeline.objectName() == "Timeline"
+    assert _find(timeline, "TimelineRuler") is not None
+    assert _find(timeline, "TimelineTracks") is not None
+    assert _find(timeline, "TimelinePlayhead") is not None
+    # A default track lane exists.
+    assert _find(timeline, "TimelineTrack") is not None
+
+
+def test_clip_object_name_after_set_clips(theme):
+    timeline = Timeline(theme, tracks=["Video 1", "Audio 1"])
+    timeline.set_clips(_demo_clips())
+    assert _find(timeline, "TimelineClip") is not None
+
+
+# ---------------------------------------------------------------------- #
+# Duration API
+# ---------------------------------------------------------------------- #
+def test_default_duration(theme):
+    timeline = Timeline(theme)
+    assert timeline.duration() == pytest.approx(60.0)
+
+
+def test_set_duration(theme):
+    timeline = Timeline(theme)
+    timeline.set_duration(120.0)
+    assert timeline.duration() == pytest.approx(120.0)
+
+
+def test_invalid_duration_in_ctor_raises(theme):
+    with pytest.raises(ValueError):
+        Timeline(theme, duration=0.0)
+    with pytest.raises(ValueError):
+        Timeline(theme, duration=-5.0)
+
+
+def test_invalid_set_duration_raises(theme):
+    timeline = Timeline(theme)
+    with pytest.raises(ValueError):
+        timeline.set_duration(0.0)
+    with pytest.raises(ValueError):
+        timeline.set_duration(-1.0)
+
+
+def test_set_duration_reclamps_playhead(theme):
+    timeline = Timeline(theme, duration=100.0)
+    timeline.set_playhead(90.0)
+    timeline.set_duration(50.0)
+    assert timeline.playhead() == pytest.approx(50.0)
+
+
+# ---------------------------------------------------------------------- #
+# Tracks API
+# ---------------------------------------------------------------------- #
+def test_default_single_track(theme):
+    timeline = Timeline(theme)
+    assert timeline.tracks() == ["Video 1"]
+    assert timeline.track_count() == 1
+
+
+def test_custom_tracks(theme):
+    timeline = Timeline(theme, tracks=["Video 1", "Audio 1"])
+    assert timeline.tracks() == ["Video 1", "Audio 1"]
+    assert timeline.track_count() == 2
+
+
+def test_add_track(theme):
+    timeline = Timeline(theme)
+    timeline.add_track("Overlay")
+    assert "Overlay" in timeline.tracks()
+    assert timeline.track_count() == 2
+
+
+# ---------------------------------------------------------------------- #
+# Clips API
+# ---------------------------------------------------------------------- #
+def test_set_and_get_clips(theme):
+    timeline = Timeline(theme, tracks=["Video 1", "Audio 1"])
+    timeline.set_clips(_demo_clips())
+    assert timeline.clip_count() == 3
+    labels = [c.get("label") for c in timeline.clips()]
+    assert labels == ["Intro", "Gameplay", "Music"]
+
+
+def test_clips_on_unknown_track_ignored(theme):
+    timeline = Timeline(theme, tracks=["Video 1"])  # only track 0 exists
+    timeline.set_clips(
+        [
+            {"track": 0, "start": 0.0, "length": 5.0, "label": "ok"},
+            {"track": 9, "start": 0.0, "length": 5.0, "label": "ignored"},
+        ]
+    )
+    # clips() returns the stored descriptors; the rendered blocks skip unknown
+    # tracks, so only one TimelineClip frame should exist.
+    rendered = [
+        w for w in timeline.findChildren(QWidget)
+        if w.objectName() == "TimelineClip"
+    ]
+    assert len(rendered) == 1
+
+
+def test_set_clips_replaces_previous(theme):
+    timeline = Timeline(theme, tracks=["Video 1"])
+    timeline.set_clips([{"track": 0, "start": 0.0, "length": 5.0, "label": "a"}])
+    timeline.set_clips([{"track": 0, "start": 0.0, "length": 5.0, "label": "b"}])
+    labels = [c.get("label") for c in timeline.clips()]
+    assert labels == ["b"]
+
+
+# ---------------------------------------------------------------------- #
+# Playhead API + signal + clamping
+# ---------------------------------------------------------------------- #
+def test_playhead_default_zero(theme):
+    timeline = Timeline(theme)
+    assert timeline.playhead() == pytest.approx(0.0)
+
+
+def test_set_playhead_emits_signal(theme):
+    timeline = Timeline(theme, duration=60.0)
+    received = []
+    timeline.playhead_changed.connect(received.append)
+    timeline.set_playhead(30.0)
+    assert received == [pytest.approx(30.0)]
+    assert timeline.playhead() == pytest.approx(30.0)
+
+
+def test_set_playhead_noop_when_unchanged(theme):
+    timeline = Timeline(theme)
+    timeline.set_playhead(10.0)
+    received = []
+    timeline.playhead_changed.connect(received.append)
+    timeline.set_playhead(10.0)
+    assert received == []
+
+
+def test_set_playhead_clamps_high(theme):
+    timeline = Timeline(theme, duration=60.0)
+    timeline.set_playhead(999.0)
+    assert timeline.playhead() == pytest.approx(60.0)
+
+
+def test_set_playhead_clamps_low(theme):
+    timeline = Timeline(theme, duration=60.0)
+    timeline.set_playhead(30.0)
+    timeline.set_playhead(-5.0)
+    assert timeline.playhead() == pytest.approx(0.0)
