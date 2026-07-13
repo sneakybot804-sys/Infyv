@@ -716,3 +716,138 @@ def test_center_drag_still_moves_after_trim_feature(theme):
     assert timeline.clips()[0]["track"] == 1
     assert moved == [(0, 1)]
     assert trimmed == []
+
+
+# ---------------------------------------------------------------------- #
+# Zoom (Phase 8H, Milestone 8; rendering-only)
+# ---------------------------------------------------------------------- #
+class _WheelStub:
+    """Minimal stand-in for a wheel event.
+
+    Exposes only what Timeline.wheelEvent reads: angleDelta().y() and accept().
+    Used to drive the real production wheelEvent without depending on the
+    version-specific QWheelEvent constructor.
+    """
+
+    class _Delta:
+        def __init__(self, y):
+            self._y = y
+
+        def y(self):
+            return self._y
+
+    def __init__(self, y):
+        self._delta = self._Delta(y)
+
+    def angleDelta(self):  # noqa: N802 (mimics the Qt API)
+        return self._delta
+
+    def accept(self):
+        pass
+
+
+def _clip_min_width(timeline, label):
+    """Return the minimum width of the TimelineClip frame captioned *label*."""
+    return _clip_frame(timeline, label).minimumWidth()
+
+
+def test_zoom_level_default(theme):
+    timeline = _selectable_timeline(theme)
+    assert timeline.zoom_level() == pytest.approx(1.0)
+
+
+def test_zoom_in_increases_level_and_emits(theme):
+    timeline = _selectable_timeline(theme)
+    received = []
+    timeline.zoom_changed.connect(received.append)
+    timeline.zoom_in()
+    assert timeline.zoom_level() == pytest.approx(1.25)
+    assert received == [pytest.approx(1.25)]
+
+
+def test_zoom_out_decreases_level_and_emits(theme):
+    timeline = _selectable_timeline(theme)
+    received = []
+    timeline.zoom_changed.connect(received.append)
+    timeline.zoom_out()
+    assert timeline.zoom_level() == pytest.approx(1.0 / 1.25)
+    assert received == [pytest.approx(1.0 / 1.25)]
+
+
+def test_set_zoom_clamps_to_max(theme):
+    timeline = _selectable_timeline(theme)
+    timeline.set_zoom(100.0)
+    assert timeline.zoom_level() == pytest.approx(4.0)
+
+
+def test_set_zoom_clamps_to_min(theme):
+    timeline = _selectable_timeline(theme)
+    timeline.set_zoom(0.001)
+    assert timeline.zoom_level() == pytest.approx(0.25)
+
+
+def test_set_zoom_noop_when_unchanged(theme):
+    timeline = _selectable_timeline(theme)
+    received = []
+    timeline.zoom_changed.connect(received.append)
+    timeline.set_zoom(1.0)  # already the default
+    assert received == []
+    assert timeline.zoom_level() == pytest.approx(1.0)
+
+
+def test_fit_to_contents_resets_and_emits(theme):
+    timeline = _selectable_timeline(theme)
+    timeline.set_zoom(2.0)
+    received = []
+    timeline.zoom_changed.connect(received.append)
+    timeline.fit_to_contents()
+    assert timeline.zoom_level() == pytest.approx(1.0)
+    assert received == [pytest.approx(1.0)]
+
+
+def test_fit_to_contents_noop_when_already_fit(theme):
+    timeline = _selectable_timeline(theme)
+    received = []
+    timeline.zoom_changed.connect(received.append)
+    timeline.fit_to_contents()  # already at 1.0
+    assert received == []
+
+
+def test_zoom_redraws_wider_clip_blocks(theme):
+    timeline = _selectable_timeline(theme)
+    base = _clip_min_width(timeline, "Intro")
+    timeline.set_zoom(2.0)
+    zoomed = _clip_min_width(timeline, "Intro")
+    # Strategy A: a redraw at higher zoom widens the rendered clip block.
+    assert zoomed > base
+
+
+def test_wheel_up_zooms_in(theme):
+    timeline = _selectable_timeline(theme)
+    timeline.wheelEvent(_WheelStub(120))
+    assert timeline.zoom_level() == pytest.approx(1.25)
+
+
+def test_wheel_down_zooms_out(theme):
+    timeline = _selectable_timeline(theme)
+    timeline.wheelEvent(_WheelStub(-120))
+    assert timeline.zoom_level() == pytest.approx(1.0 / 1.25)
+
+
+def test_zoom_preserves_selection_and_emits_no_clip_signals(theme):
+    timeline = _selectable_timeline(theme)
+    timeline.select_clip(1)  # "Gameplay"
+    selected = []
+    moved = []
+    trimmed = []
+    timeline.clip_selected.connect(selected.append)
+    timeline.clip_moved.connect(lambda i, t: moved.append((i, t)))
+    timeline.clip_trimmed.connect(lambda i, s, ln: trimmed.append((i, s, ln)))
+    timeline.set_zoom(2.0)
+    # Zoom is rendering-only: selection survives the redraw and no clip signal
+    # fires.
+    assert timeline.selected_index() == 1
+    assert timeline.selected_clip()["label"] == "Gameplay"
+    assert selected == []
+    assert moved == []
+    assert trimmed == []
