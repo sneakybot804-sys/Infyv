@@ -17,6 +17,8 @@ pytest.importorskip("PySide6")
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import QEvent, QPointF, Qt  # noqa: E402
+from PySide6.QtGui import QMouseEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
 from gui.screens.media_workspace_screen import build_media_workspace_screen  # noqa: E402
@@ -168,4 +170,71 @@ def test_clearing_timeline_selection_empties_inspector(theme):
     inspector = screen.findChildren(ClipInspector)[0]
     timeline.select_clip(0)
     timeline.clear_selection()
+    assert inspector.is_empty() is True
+
+
+# ---------------------------------------------------------------------- #
+# Click-to-select end-to-end (Phase 8H, Milestone 5)
+# ---------------------------------------------------------------------- #
+def _left_click(widget):
+    """Dispatch a synthetic left-button press to *widget*.
+
+    Geometry-free and offscreen-safe (matches the timeline click tests): the
+    QMouseEvent is delivered straight to the target with
+    QApplication.sendEvent, so the embedded Timeline's installed event filter
+    runs regardless of visibility or layout geometry (the screen is never
+    shown). Selection triggers on MouseButtonPress.
+    """
+    event = QMouseEvent(
+        QEvent.Type.MouseButtonPress,
+        QPointF(1.0, 1.0),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    QApplication.instance().sendEvent(widget, event)
+
+
+def _first_clip_frame(timeline):
+    """Return the first rendered TimelineClip frame in *timeline*, or None."""
+    for frame in timeline.findChildren(QWidget):
+        if frame.objectName() == "TimelineClip":
+            return frame
+    return None
+
+
+def test_clicking_timeline_clip_updates_inspector(theme):
+    screen = build_media_workspace_screen(theme)
+    timeline = screen.findChildren(Timeline)[0]
+    inspector = screen.findChildren(ClipInspector)[0]
+    assert inspector.is_empty() is True
+
+    received = []
+    timeline.clip_selected.connect(received.append)
+
+    frame = _first_clip_frame(timeline)
+    assert frame is not None, "screen should seed the timeline with clips"
+    _left_click(frame)
+
+    # Full path: click -> selection -> clip_selected -> inspector update.
+    assert timeline.selected_index() != -1
+    assert len(received) == 1
+    assert received[0] == timeline.selected_index()
+    assert inspector.is_empty() is False
+    assert inspector.current() == timeline.selected_clip()
+
+
+def test_clicking_empty_timeline_space_empties_inspector(theme):
+    screen = build_media_workspace_screen(theme)
+    timeline = screen.findChildren(Timeline)[0]
+    inspector = screen.findChildren(ClipInspector)[0]
+
+    _left_click(_first_clip_frame(timeline))
+    assert inspector.is_empty() is False
+
+    tracks_bg = _find(timeline, "TimelineTracks")
+    assert tracks_bg is not None
+    _left_click(tracks_bg)
+
+    assert timeline.selected_index() == -1
     assert inspector.is_empty() is True
