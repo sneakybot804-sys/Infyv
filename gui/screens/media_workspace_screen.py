@@ -38,6 +38,7 @@ from gui.widgets.glass_card import GlassCard
 from gui.widgets.media_browser import MediaBrowser
 from gui.widgets.meta_label import MetaLabel
 from gui.widgets.section_header import SectionHeader
+from gui.widgets.timeline import Timeline
 from gui.widgets.transport_bar import TransportBar
 
 #: Static/demo media used to seed the browser (no filesystem access).
@@ -88,6 +89,9 @@ class _MediaWorkspace(QWidget):
         splitter.setStretchFactor(1, 1)
         splitter.setStretchFactor(2, 0)
         root.addWidget(splitter, 1)
+
+        # Bottom Timeline region (additive; below the splitter).
+        root.addWidget(self._build_timeline())
 
         # Screen-level, UI-only wiring: selection updates preview + details.
         self._browser.selection_changed.connect(self._on_selection_changed)
@@ -168,6 +172,46 @@ class _MediaWorkspace(QWidget):
         card.set_content(content)
         layout.addWidget(card, 1)
         return details
+
+    def _build_timeline(self) -> QWidget:
+        """Build the bottom Timeline region (UI-only; static demo clips)."""
+        tokens = self._theme.tokens
+
+        region = QWidget()
+        region.setObjectName("MediaWorkspaceTimeline")
+        region.setMinimumHeight(180)
+        layout = QVBoxLayout(region)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(tokens.spacing.sm)
+
+        card = GlassCard(self._theme, glow=None, elevation="low")
+        card.setObjectName("MediaWorkspaceTimelineCard")
+        content = QWidget()
+        inner = QVBoxLayout(content)
+        inner.setContentsMargins(
+            tokens.spacing.lg, tokens.spacing.lg, tokens.spacing.lg, tokens.spacing.lg
+        )
+        inner.setSpacing(tokens.spacing.sm)
+
+        header = SectionHeader(self._theme, "Timeline", subtitle="Preview only")
+        header.set_divider(True)
+        inner.addWidget(header)
+
+        self._timeline = Timeline(
+            self._theme, duration=60.0, tracks=["Video 1", "Audio 1"]
+        )
+        self._timeline.set_clips(
+            [
+                {"track": 0, "start": 0.0, "length": 12.0, "label": "Intro"},
+                {"track": 0, "start": 12.0, "length": 20.0, "label": "Gameplay"},
+                {"track": 1, "start": 0.0, "length": 32.0, "label": "Music"},
+            ]
+        )
+        inner.addWidget(self._timeline, 1)
+
+        card.set_content(content)
+        layout.addWidget(card, 1)
+        return region
 
     # ------------------------------------------------------------------ #
     # UI-only wiring
