@@ -100,6 +100,9 @@ class _MediaWorkspace(QWidget):
         # details; timeline clip selection updates the clip inspector.
         self._browser.selection_changed.connect(self._on_selection_changed)
         self._timeline.clip_selected.connect(self._on_clip_selected)
+        # A drag-move updates the clip model without re-emitting clip_selected,
+        # so refresh the inspector on clip_moved to keep it in sync.
+        self._timeline.clip_moved.connect(self._on_clip_moved)
 
     # ------------------------------------------------------------------ #
     # Region builders
@@ -276,6 +279,15 @@ class _MediaWorkspace(QWidget):
 
         Reflects the timeline's currently selected clip; a cleared selection
         (``index == -1``) returns the inspector to its empty state.
+        """
+        self._clip_inspector.show_clip(self._timeline.selected_clip())
+
+    def _on_clip_moved(self, index: int, new_track: int) -> None:
+        """Refresh the clip inspector after a timeline clip is moved (UI-only).
+
+        A drag-move changes the clip's track without changing the selection
+        index (so :attr:`clip_selected` is not re-emitted); re-show the
+        currently selected clip so the inspector reflects its new track.
         """
         self._clip_inspector.show_clip(self._timeline.selected_clip())
 
