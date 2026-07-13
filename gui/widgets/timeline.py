@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional
 
-from PySide6.QtCore import QEvent, Qt, Signal
+from PySide6.QtCore import QEvent, QTimer, Qt, Signal
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -66,6 +66,8 @@ class Timeline(ThemedWidget):
     clip_moved = Signal(int, int)
     clip_trimmed = Signal(int, float, float)
     zoom_changed = Signal(float)
+    playback_state_changed = Signal(str)
+    playback_finished = Signal()
 
     def __init__(
         self,
@@ -125,6 +127,20 @@ class Timeline(ThemedWidget):
         self._zoom_max = 4.0
         self._zoom_step = 1.25
         self._clip_base_width = self.scaled(self.tokens.spacing.xxl)
+        # Playback state (Milestone 9). Timer-driven transport that advances
+        # the existing playhead; no real media. _playback_state is one of
+        # 'stopped' / 'playing' / 'paused'. The single-owner QTimer ticks at
+        # _play_interval_ms (~30fps) and advances the playhead by that interval
+        # in seconds via the existing set_playhead (clamped; emits
+        # playhead_changed). Reaching the duration stops and emits
+        # playback_finished.
+        self._playback_state = "stopped"
+        self._play_interval_ms = 33
+        self._play_timer = QTimer(self)
+        self._play_timer.setInterval(self._play_interval_ms)
+        self._play_timer.timeout.connect(self._on_play_tick)
+        # Receive keyboard shortcuts (Space / Home / End).
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
         tokens = self.tokens
         self._column = QVBoxLayout(self)
@@ -142,6 +158,10 @@ class Timeline(ThemedWidget):
         )
         self._ruler_row.setSpacing(0)
         self._column.addWidget(self._ruler)
+        # Click-to-seek / playhead drag on the ruler (Milestone 9). Installed
+        # only on the ruler, a separate target from the clip frames / lanes, so
+        # clip select (M5), move (M6) and trim (M7) are unaffected.
+        self._ruler.installEventFilter(self)
 
         # Track lanes container.
         self._tracks_container = QWidget(self)
@@ -186,6 +206,106 @@ class Timeline(ThemedWidget):
             self._playhead = self._duration
         self._build_ruler()
         self._rebuild_clips()
+
+    def current_time(self) -> float:
+        """Return the current playhead time in seconds (transport reader)."""
+        return self._playhead
+
+    def playback_state(self) -> str:
+        """Return the transport state ('stopped' / 'playing' / 'paused')."""
+        return self._playback_state
+
+    def is_playing(self) -> bool:
+        """Return ``True`` while playback is running."""
+        return self._playback_state == "playing"
+
+    def play(self) -> None:
+        """Start (or resume) timer-driven playback from the playhead.
+
+        Starting at (or past) the end restarts from 0. A no-op when already
+        playing. Emits :attr:`playback_state_changed` on a state change.
+        """
+        if self._playback_state == "playing":
+            return
+        if self._playhead >= self._duration:
+            self.set_playhead(0.0)
+        self._set_playback_state("playing")
+        self._play_timer.start()
+
+    def pause(self) -> None:
+        """Pause playback, keeping the current playhead. A no-op when not playing."""
+        if self._playback_state != "playing":
+            return
+        self._play_timer.stop()
+        self._set_playback_state("paused")
+
+    def stop(self) -> None:
+        """Stop playback and reset the playhead to 0.
+
+        Idempotent for the state, but always resets the playhead. Emits
+        :attr:`playback_state_changed` only when the state changes.
+        """
+        self._play_timer.stop()
+        self._set_playback_state("stopped")
+        self.set_playhead(0.0)
+
+    def toggle_play(self) -> None:
+        """Toggle between play and pause (Space shortcut)."""
+        if self._playback_state == "playing":
+            self.pause()
+        else:
+            self.play()
+
+    def _set_playback_state(self, state: str) -> None:
+        """Set the transport state; emit playback_state_changed on a change."""
+        if state == self._playback_state:
+            return
+        self._playback_state = state
+        self.playback_state_changed.emit(self._playback_state)
+
+    def _on_play_tick(self) -> None:
+        """Advance the playhead one timer interval; stop at the end."""
+        step = self._play_interval_ms / 1000.0
+        target = self._playhead + step
+        if target >= self._duration:
+            self.set_playhead(self._duration)
+            self._play_timer.stop()
+            self._set_playback_state("stopped")
+            self.playback_finished.emit()
+            return
+        self.set_playhead(target)
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        """Keyboard transport: Space toggles play/pause, Home/End seek."""
+        key = event.key()
+        if key == Qt.Key.Key_Space:
+            self.toggle_play()
+            event.accept()
+            return
+        if key == Qt.Key.Key_Home:
+            self.set_playhead(0.0)
+            event.accept()
+            return
+        if key == Qt.Key.Key_End:
+            self.set_playhead(self._duration)
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def _seek_from_ruler(self, event) -> None:
+        """Map a ruler press/drag x-position to a time and seek there.
+
+        Rendering-geometry based: the ruler width maps to [0, duration]. A
+        zero-width ruler (e.g. offscreen, never shown) is a no-op and never
+        raises. Drives the existing set_playhead (clamped; emits
+        playhead_changed).
+        """
+        width = self._ruler.width()
+        if width <= 0:
+            return
+        x = event.position().x()
+        fraction = max(0.0, min(1.0, x / width))
+        self.set_playhead(self._duration * fraction)
 
     def zoom_level(self) -> float:
         """Return the current zoom level (``1.0`` is the fit baseline)."""
@@ -520,11 +640,21 @@ class Timeline(ThemedWidget):
                     self.select_clip(index)
                     self._arm_drag(index, event)
                     return True
+            # A press on the ruler seeks the playhead (Milestone 9).
+            if watched is self._ruler:
+                self._seek_from_ruler(event)
+                return False
             # Otherwise the press landed on a lane or the tracks background
             # (empty space): clear the selection.
             if watched is self._tracks_container or watched in self._track_widgets:
                 self.clear_selection()
                 return False
+        elif etype == QEvent.Type.MouseMove and watched is self._ruler and (
+            event.buttons() == Qt.MouseButton.LeftButton
+        ):
+            # Dragging on the ruler scrubs the playhead (Milestone 9).
+            self._seek_from_ruler(event)
+            return False
         elif etype == QEvent.Type.MouseMove and self._drag_armed:
             self._update_drag(event)
             return False
