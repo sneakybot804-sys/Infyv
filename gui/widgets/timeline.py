@@ -52,12 +52,16 @@ class Timeline(ThemedWidget):
     Signals:
         playhead_changed(float): Emitted with the new playhead time (seconds)
             when it changes via :meth:`set_playhead`.
+        clip_selected(int): Emitted with the newly selected clip index (or
+            ``-1`` when the selection is cleared) via :meth:`select_clip` /
+            :meth:`clear_selection`. Programmatic only (no mouse handling).
 
     Raises:
         ValueError: If ``duration`` is not strictly positive.
     """
 
     playhead_changed = Signal(float)
+    clip_selected = Signal(int)
 
     def __init__(
         self,
@@ -76,6 +80,11 @@ class Timeline(ThemedWidget):
         self._track_names: List[str] = []
         self._track_widgets: List[QWidget] = []
         self._clips: List[Clip] = []
+        # Programmatic selection state (Milestone 4). -1 means no selection.
+        self._selected = -1
+        # Rendered clip frames, in clip order, tracked during _rebuild_clips
+        # so a selection can mark the matching frame's dynamic property.
+        self._clip_widgets: List[QWidget] = []
 
         tokens = self.tokens
         self._column = QVBoxLayout(self)
@@ -171,9 +180,16 @@ class Timeline(ThemedWidget):
         Each clip is a mapping with keys ``track`` (int index), ``start``
         (seconds), ``length`` (seconds) and optional ``label`` (str). Clips on
         unknown track indices are ignored. Static only: no DnD, no trimming.
+
+        Replacing the clips clears any current selection (to ``-1``) and emits
+        :attr:`clip_selected` if a selection was active.
         """
         self._clips = [dict(c) for c in clips]
+        had_selection = self._selected != -1
+        self._selected = -1
         self._rebuild_clips()
+        if had_selection:
+            self.clip_selected.emit(-1)
 
     def clips(self) -> List[Clip]:
         """Return a copy of the current clip descriptors."""
@@ -182,6 +198,46 @@ class Timeline(ThemedWidget):
     def clip_count(self) -> int:
         """Return the number of rendered clip blocks."""
         return len(self._clips)
+
+    def select_clip(self, index: int) -> None:
+        """Select the clip at ``index`` (programmatic; no mouse handling).
+
+        Passing ``-1`` clears the selection. Emits :attr:`clip_selected` when
+        the selection changes; a no-op otherwise. Marks the corresponding
+        ``TimelineClip`` frame with a ``selected`` dynamic property.
+
+        Raises:
+            ValueError: If ``index`` is out of range (and not ``-1``).
+        """
+        if index != -1 and not (0 <= index < len(self._clips)):
+            raise ValueError(f"clip index out of range: {index}")
+        if index == self._selected:
+            return
+        self._selected = index
+        self._apply_selection_property()
+        self.clip_selected.emit(self._selected)
+
+    def clear_selection(self) -> None:
+        """Clear the current clip selection (to ``-1``); idempotent.
+
+        Emits :attr:`clip_selected` with ``-1`` only when a selection was
+        active.
+        """
+        if self._selected == -1:
+            return
+        self._selected = -1
+        self._apply_selection_property()
+        self.clip_selected.emit(-1)
+
+    def selected_index(self) -> int:
+        """Return the selected clip index (``-1`` when none)."""
+        return self._selected
+
+    def selected_clip(self) -> Optional[Clip]:
+        """Return a copy of the selected clip descriptor, or ``None``."""
+        if 0 <= self._selected < len(self._clips):
+            return dict(self._clips[self._selected])
+        return None
 
     def playhead(self) -> float:
         """Return the current playhead time in seconds."""
@@ -230,10 +286,14 @@ class Timeline(ThemedWidget):
                 if widget is not None and widget.objectName() == "TimelineClip":
                     row.takeAt(i)
                     widget.setParent(None)
+        self._clip_widgets = []
 
         for clip in self._clips:
             track_index = int(clip.get("track", 0))
             if not (0 <= track_index < len(self._track_widgets)):
+                # Keep _clip_widgets aligned with clip order: unrenderable
+                # clips (unknown track) have no frame.
+                self._clip_widgets.append(None)
                 continue
             lane = self._track_widgets[track_index]
             row = lane.layout()
@@ -251,8 +311,26 @@ class Timeline(ThemedWidget):
             block_layout.addWidget(caption)
             # Insert before the trailing stretch spacer.
             row.insertWidget(max(0, row.count() - 1), block)
+            self._clip_widgets.append(block)
 
         self.apply_theme()
+        self._apply_selection_property()
+
+    def _apply_selection_property(self) -> None:
+        """Set the ``selected`` dynamic property on the selected clip frame.
+
+        Clears the property on all other rendered frames. Uses unpolish/polish
+        so any style depending on the property is refreshed. Does not alter
+        apply_theme's base clip styling; the property is purely additive.
+        """
+        for i, frame in enumerate(self._clip_widgets):
+            if frame is None:
+                continue
+            is_selected = i == self._selected
+            if frame.property("selected") != is_selected:
+                frame.setProperty("selected", is_selected)
+                frame.style().unpolish(frame)
+                frame.style().polish(frame)
 
     # ------------------------------------------------------------------ #
     # Theming
