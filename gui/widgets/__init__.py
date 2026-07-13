@@ -23,6 +23,7 @@ from gui.widgets.form_field import FormField
 from gui.widgets.form_section import FormSection
 from gui.widgets.glass_card import GlassCard
 from gui.widgets.icon_button import IconButton
+from gui.widgets.media_browser import MediaBrowser
 from gui.widgets.meta_label import MetaLabel
 from gui.widgets.neon_button import NeonButton
 from gui.widgets.progress_bar import ProgressBar
@@ -34,6 +35,7 @@ from gui.widgets.stat_block import StatBlock
 from gui.widgets.status_badge import StatusBadge
 from gui.widgets.text_field import TextField
 from gui.widgets.toggle_switch import ToggleSwitch
+from gui.widgets.transport_bar import TransportBar
 
 __all__ = [
     "ThemedWidget",
@@ -54,4 +56,6 @@ __all__ = [
     "FormField",
     "FormSection",
     "SettingsGroup",
+    "MediaBrowser",
+    "TransportBar",
 ]
