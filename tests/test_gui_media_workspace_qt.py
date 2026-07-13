@@ -470,3 +470,61 @@ def test_drag_move_emits_no_clip_selected(theme):
     # inspector is kept in sync solely via clip_moved.
     assert selected == []
     assert moved == [(0, 1)]
+
+
+# ---------------------------------------------------------------------- #
+# Playback wiring end-to-end (Phase 8H, Milestone 9)
+# ---------------------------------------------------------------------- #
+def test_transport_play_stop_drive_timeline(theme):
+    screen = build_media_workspace_screen(theme)
+    timeline = screen.findChildren(Timeline)[0]
+    transport = screen.findChildren(TransportBar)[0]
+    timeline.set_playhead(15.0)
+
+    # Transport -> Timeline: play_requested starts timeline playback.
+    transport.play_requested.emit()
+    assert timeline.is_playing() is True
+    assert timeline.playback_state() == "playing"
+
+    # stop_requested stops playback and resets the playhead.
+    transport.stop_requested.emit()
+    assert timeline.playback_state() == "stopped"
+    assert timeline.playhead() == pytest.approx(0.0)
+
+
+def test_timeline_state_mirrors_onto_transport(theme):
+    screen = build_media_workspace_screen(theme)
+    timeline = screen.findChildren(Timeline)[0]
+    transport = screen.findChildren(TransportBar)[0]
+
+    timeline.play()
+    assert transport.state() == "playing"
+    timeline.pause()
+    assert transport.state() == "paused"
+    timeline.stop()
+    assert transport.state() == "stopped"
+
+
+def test_timeline_playhead_updates_transport_position(theme):
+    screen = build_media_workspace_screen(theme)
+    timeline = screen.findChildren(Timeline)[0]
+    transport = screen.findChildren(TransportBar)[0]
+    duration = timeline.duration()
+
+    timeline.set_playhead(duration / 2.0)
+    # The current-time indicator is mirrored onto the transport seek position.
+    assert transport.position() == pytest.approx(0.5)
+
+
+def test_playback_does_not_disturb_selection(theme):
+    screen = build_media_workspace_screen(theme)
+    timeline = screen.findChildren(Timeline)[0]
+    transport = screen.findChildren(TransportBar)[0]
+    timeline.select_clip(0)
+
+    transport.play_requested.emit()
+    timeline._on_play_tick()
+    transport.stop_requested.emit()
+
+    # Playback is playhead-only: the clip selection is untouched.
+    assert timeline.selected_index() == 0
