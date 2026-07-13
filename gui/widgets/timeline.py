@@ -113,6 +113,7 @@ class Timeline(ThemedWidget):
         self._trim_edge_zone = 8
         self._px_per_second = 8.0
         self._trim_origin: Optional[tuple] = None
+        self._trim_last_pos = None
 
         tokens = self.tokens
         self._column = QVBoxLayout(self)
@@ -519,24 +520,32 @@ class Timeline(ThemedWidget):
                 return
             self._drag_active = True
         if self._drag_mode in ("trim_left", "trim_right"):
+            # Mark the trim and remember the latest pointer position; the trim
+            # is committed on release (see _finish_drag), so a gesture that
+            # actually ends on another lane can still fall through to a move.
             self._trimming = True
-            self._apply_trim(event)
+            self._trim_last_pos = event.position()
             return
         lane = self._lane_at(event)
         self._set_drop_target(lane)
 
-    def _apply_trim(self, event) -> None:
-        """Apply a live edge trim from the pointer movement (Milestone 7).
+    def _apply_trim(self) -> None:
+        """Commit the edge trim from the accumulated pointer movement (M7).
 
         Left trim holds the right edge fixed (adjusts start, compensating
         length); right trim holds the left edge fixed (adjusts length). The
-        horizontal pointer delta is mapped to seconds via _px_per_second and
-        applied through trim_clip, which clamps to the approved rules.
+        horizontal pointer delta (press -> last move) is mapped to seconds via
+        _px_per_second and applied through trim_clip, which clamps to the
+        approved rules.
         """
-        if self._trim_origin is None or self._drag_press_pos is None:
+        if (
+            self._trim_origin is None
+            or self._drag_press_pos is None
+            or self._trim_last_pos is None
+        ):
             return
         start0, length0 = self._trim_origin
-        dx = event.position().x() - self._drag_press_pos.x()
+        dx = self._trim_last_pos.x() - self._drag_press_pos.x()
         delta_seconds = dx / self._px_per_second
         if self._drag_mode == "trim_left":
             right_edge = start0 + length0
@@ -552,23 +561,49 @@ class Timeline(ThemedWidget):
             )
 
     def _finish_drag(self, watched) -> None:
-        """Commit the interaction: a trim is already applied live; else move."""
-        if self._drag_mode in ("trim_left", "trim_right"):
-            # The trim was applied live during _update_drag; just reset state.
-            self._reset_drag()
-            return
+        """Commit the interaction, decided by the release target.
+
+        A release on (or inside) a clip frame is a trim; a release elsewhere
+        (on a lane / tracks background) is a move. This resolves the gesture
+        collision where both the M6 move and the M7 left-trim begin near the
+        clip's left edge: the arm-time classification only pre-selects a trim,
+        but the move still wins when the drag ends on a different lane.
+        """
         armed_active = self._drag_active
         drag_index = self._drag_index
+        is_trim = (
+            self._drag_mode in ("trim_left", "trim_right")
+            and self._clip_frame_of(watched) is not None
+        )
         dest_lane = self._lane_of(watched)
         if dest_lane is None:
             dest_lane = self._drop_lane
         self._set_drop_target(None)
+        self._reset_drag_keep_trim()
+        if is_trim:
+            if armed_active and drag_index >= 0:
+                self._apply_trim()
+            self._reset_drag()
+            return
         self._reset_drag()
         if not armed_active or drag_index < 0 or dest_lane is None:
             return
         dest_track = self._track_widgets.index(dest_lane)
         # move_clip is a no-op when the clip is already on dest_track.
         self.move_clip(drag_index, dest_track)
+
+    def _clip_frame_of(self, widget) -> Optional[QWidget]:
+        """Return the ``TimelineClip`` frame owning ``widget`` (self included)."""
+        node = widget
+        while node is not None:
+            if node in self._clip_widgets:
+                return node
+            node = node.parentWidget() if hasattr(node, "parentWidget") else None
+        return None
+
+    def _reset_drag_keep_trim(self) -> None:
+        """Reset only the drop-target preview; keep drag/trim fields for commit."""
+        self._drop_lane = None
 
     def _reset_drag(self) -> None:
         """Clear all pending/active drag and trim state."""
@@ -579,6 +614,7 @@ class Timeline(ThemedWidget):
         self._drag_mode = "move"
         self._trimming = False
         self._trim_origin = None
+        self._trim_last_pos = None
 
     def _lane_of(self, widget) -> Optional[QWidget]:
         """Return the ``TimelineTrack`` lane owning ``widget`` (self included)."""
