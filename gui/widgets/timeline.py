@@ -65,6 +65,7 @@ class Timeline(ThemedWidget):
     clip_selected = Signal(int)
     clip_moved = Signal(int, int)
     clip_trimmed = Signal(int, float, float)
+    zoom_changed = Signal(float)
 
     def __init__(
         self,
@@ -114,6 +115,16 @@ class Timeline(ThemedWidget):
         self._px_per_second = 8.0
         self._trim_origin: Optional[tuple] = None
         self._trim_last_pos = None
+        # Zoom state (Milestone 8). Rendering-only: _zoom scales the clip block
+        # widths on redraw; it never changes the clip model, selection, or
+        # drag/trim behavior. Clamped to [_zoom_min, _zoom_max]; zoom_in /
+        # zoom_out step multiplicatively by _zoom_step; fit_to_contents resets
+        # to the 1.0 baseline. _clip_base_width is the unscaled block width.
+        self._zoom = 1.0
+        self._zoom_min = 0.25
+        self._zoom_max = 4.0
+        self._zoom_step = 1.25
+        self._clip_base_width = self.scaled(self.tokens.spacing.xxl)
 
         tokens = self.tokens
         self._column = QVBoxLayout(self)
@@ -175,6 +186,51 @@ class Timeline(ThemedWidget):
             self._playhead = self._duration
         self._build_ruler()
         self._rebuild_clips()
+
+    def zoom_level(self) -> float:
+        """Return the current zoom level (``1.0`` is the fit baseline)."""
+        return self._zoom
+
+    def set_zoom(self, level: float) -> None:
+        """Set the zoom level (clamped to ``[zoom_min, zoom_max]``).
+
+        Rendering-only: a change redraws the ruler and clip blocks (the same
+        redraw path as :meth:`set_duration`, which preserves the selection) so
+        the clip widths reflect the new zoom, and emits :attr:`zoom_changed`.
+        A level that clamps to the current value is a no-op and emits nothing.
+        Never alters the clip model, selection, or drag/trim behavior.
+        """
+        clamped = max(self._zoom_min, min(self._zoom_max, float(level)))
+        if clamped == self._zoom:
+            return
+        self._zoom = clamped
+        self._build_ruler()
+        self._rebuild_clips()
+        self.zoom_changed.emit(self._zoom)
+
+    def zoom_in(self) -> None:
+        """Zoom in one step (multiplicative; clamped to ``zoom_max``)."""
+        self.set_zoom(self._zoom * self._zoom_step)
+
+    def zoom_out(self) -> None:
+        """Zoom out one step (multiplicative; clamped to ``zoom_min``)."""
+        self.set_zoom(self._zoom / self._zoom_step)
+
+    def fit_to_contents(self) -> None:
+        """Fit the whole timeline to the view (reset zoom to the 1.0 baseline)."""
+        self.set_zoom(1.0)
+
+    def wheelEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        """Mouse wheel (or Ctrl + wheel) zooms the timeline.
+
+        Scroll up zooms in, scroll down zooms out. Additive input handling;
+        it drives the existing zoom API and consumes the event.
+        """
+        if event.angleDelta().y() > 0:
+            self.zoom_in()
+        else:
+            self.zoom_out()
+        event.accept()
 
     def add_track(self, name: str) -> QWidget:
         """Append a track lane named ``name`` and return its widget."""
@@ -430,6 +486,9 @@ class Timeline(ThemedWidget):
             caption.setObjectName("TimelineClipLabel")
             caption.setFont(self._theme.font("caption"))
             block_layout.addWidget(caption)
+            # Rendering-only zoom: the block's minimum width scales with the
+            # current zoom level (Milestone 8). No model / object-name change.
+            block.setMinimumWidth(int(self._clip_base_width * self._zoom))
             # Insert before the trailing stretch spacer.
             row.insertWidget(max(0, row.count() - 1), block)
             # Left-click on a clip selects it (see eventFilter).
