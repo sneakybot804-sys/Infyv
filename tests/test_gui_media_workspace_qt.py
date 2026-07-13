@@ -241,6 +241,89 @@ def test_clicking_empty_timeline_space_empties_inspector(theme):
 
 
 # ---------------------------------------------------------------------- #
+# Trim end-to-end (Phase 8H, Milestone 7; inspector stays in sync)
+# ---------------------------------------------------------------------- #
+def test_programmatic_trim_updates_inspector(theme):
+    screen = build_media_workspace_screen(theme)
+    timeline = screen.findChildren(Timeline)[0]
+    inspector = screen.findChildren(ClipInspector)[0]
+    # Select "Intro" (index 0, track 0, start 0.0, length 12.0).
+    timeline.select_clip(0)
+    assert inspector.current()["start"] == pytest.approx(0.0)
+
+    # Count emissions from the trim only (connect after the initial select).
+    selected = []
+    trimmed = []
+    timeline.clip_selected.connect(selected.append)
+    timeline.clip_trimmed.connect(lambda i, s, ln: trimmed.append((i, s, ln)))
+
+    timeline.trim_clip(0, start=2.0, length=8.0)
+
+    # Full path: trim_clip -> clip_trimmed -> _on_clip_trimmed -> show_clip.
+    assert inspector.is_empty() is False
+    assert inspector.current() == timeline.selected_clip()
+    assert inspector.current()["start"] == pytest.approx(2.0)
+    assert inspector.current()["length"] == pytest.approx(8.0)
+    assert inspector.current()["track"] == 0
+    assert len(trimmed) == 1
+    assert trimmed[0][0] == 0
+    # The trim keeps the same selection, so clip_selected is not re-emitted.
+    assert selected == []
+    assert timeline.selected_index() == 0
+
+
+def test_noop_trim_leaves_inspector_unchanged(theme):
+    screen = build_media_workspace_screen(theme)
+    timeline = screen.findChildren(Timeline)[0]
+    inspector = screen.findChildren(ClipInspector)[0]
+    timeline.select_clip(0)
+    before = inspector.current()
+
+    trimmed = []
+    timeline.clip_trimmed.connect(lambda i, s, ln: trimmed.append((i, s, ln)))
+    # No arguments -> values unchanged -> no-op.
+    timeline.trim_clip(0)
+
+    assert trimmed == []
+    assert inspector.current() == before
+
+
+def test_mouse_edge_trim_updates_inspector(theme):
+    screen = build_media_workspace_screen(theme)
+    timeline = screen.findChildren(Timeline)[0]
+    inspector = screen.findChildren(ClipInspector)[0]
+    # Select "Intro" (index 0, start 0.0, length 12.0 -> right edge 12.0).
+    timeline.select_clip(0)
+    frame = _clip_frame_by_label(timeline, "Intro")
+    assert frame is not None
+    # Give the frame a real width so the width-guarded classification treats a
+    # near-left-edge press as a trim (does not depend on offscreen layout).
+    frame.resize(200, 40)
+
+    selected = []
+    trimmed = []
+    timeline.clip_selected.connect(selected.append)
+    timeline.clip_trimmed.connect(lambda i, s, ln: trimmed.append((i, s, ln)))
+
+    # Left-edge press, drag right past the threshold (dx = 40px -> +5.0s at
+    # 8 px/s). Left trim holds the right edge (12.0) fixed.
+    _press(frame, QPointF(2.0, 5.0))
+    _move(frame, QPointF(42.0, 5.0))
+    _release(frame, QPointF(42.0, 5.0))
+
+    assert inspector.is_empty() is False
+    assert inspector.current() == timeline.selected_clip()
+    assert inspector.current()["start"] == pytest.approx(5.0)
+    assert inspector.current()["length"] == pytest.approx(7.0)
+    assert inspector.current()["track"] == 0
+    assert len(trimmed) >= 1
+    # Pressing the already-selected clip re-selects it (no-op), so the trim
+    # does not re-emit clip_selected.
+    assert selected == []
+    assert timeline.selected_index() == 0
+
+
+# ---------------------------------------------------------------------- #
 # Drag-move end-to-end (Phase 8H, Milestone 6; inspector stays in sync)
 # ---------------------------------------------------------------------- #
 def _mouse_event(kind, local, button, buttons):
