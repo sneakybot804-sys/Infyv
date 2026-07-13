@@ -497,10 +497,14 @@ class Timeline(ThemedWidget):
         if frame is not None:
             width = frame.width()
             x = event.position().x()
-            if x <= self._trim_edge_zone:
-                self._drag_mode = "trim_left"
-            elif width and x >= width - self._trim_edge_zone:
-                self._drag_mode = "trim_right"
+            # Only classify a trim when the frame has a usable width; a press
+            # near an edge otherwise (e.g. a zero-width offscreen frame) stays
+            # a move, preserving M5 click and M6 drag behavior.
+            if width > 2 * self._trim_edge_zone:
+                if x <= self._trim_edge_zone:
+                    self._drag_mode = "trim_left"
+                elif x >= width - self._trim_edge_zone:
+                    self._drag_mode = "trim_right"
             clip = self._clips[index]
             self._trim_origin = (
                 float(clip.get("start", 0.0)),
