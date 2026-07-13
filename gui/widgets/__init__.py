@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from gui.widgets.base import ThemedWidget
 from gui.widgets.checkbox import Checkbox
+from gui.widgets.clip_inspector import ClipInspector
 from gui.widgets.dropdown import Dropdown
 from gui.widgets.form_field import FormField
 from gui.widgets.form_section import FormSection
@@ -58,4 +59,5 @@ __all__ = [
     "SettingsGroup",
     "MediaBrowser",
     "TransportBar",
+    "ClipInspector",
 ]
