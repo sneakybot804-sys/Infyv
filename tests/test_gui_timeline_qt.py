@@ -200,3 +200,95 @@ def test_set_playhead_clamps_low(theme):
     timeline.set_playhead(30.0)
     timeline.set_playhead(-5.0)
     assert timeline.playhead() == pytest.approx(0.0)
+
+
+# ---------------------------------------------------------------------- #
+# Clip selection (Phase 8H, Milestone 4; programmatic only)
+# ---------------------------------------------------------------------- #
+def _selectable_timeline(theme):
+    timeline = Timeline(theme, tracks=["Video 1", "Audio 1"])
+    timeline.set_clips(_demo_clips())
+    return timeline
+
+
+def test_default_no_selection(theme):
+    timeline = _selectable_timeline(theme)
+    assert timeline.selected_index() == -1
+    assert timeline.selected_clip() is None
+
+
+def test_select_clip_sets_state(theme):
+    timeline = _selectable_timeline(theme)
+    timeline.select_clip(1)
+    assert timeline.selected_index() == 1
+    clip = timeline.selected_clip()
+    assert clip is not None
+    assert clip["label"] == "Gameplay"
+
+
+def test_select_clip_emits_signal(theme):
+    timeline = _selectable_timeline(theme)
+    received = []
+    timeline.clip_selected.connect(received.append)
+    timeline.select_clip(2)
+    assert received == [2]
+
+
+def test_select_clip_noop_when_unchanged(theme):
+    timeline = _selectable_timeline(theme)
+    timeline.select_clip(0)
+    received = []
+    timeline.clip_selected.connect(received.append)
+    timeline.select_clip(0)
+    assert received == []
+
+
+def test_clear_selection_resets_and_emits(theme):
+    timeline = _selectable_timeline(theme)
+    timeline.select_clip(1)
+    received = []
+    timeline.clip_selected.connect(received.append)
+    timeline.clear_selection()
+    assert timeline.selected_index() == -1
+    assert timeline.selected_clip() is None
+    assert received == [-1]
+
+
+def test_clear_selection_noop_when_empty(theme):
+    timeline = _selectable_timeline(theme)
+    received = []
+    timeline.clip_selected.connect(received.append)
+    timeline.clear_selection()
+    assert received == []
+
+
+def test_select_clip_minus_one_clears(theme):
+    timeline = _selectable_timeline(theme)
+    timeline.select_clip(0)
+    timeline.select_clip(-1)
+    assert timeline.selected_index() == -1
+    assert timeline.selected_clip() is None
+
+
+def test_select_clip_out_of_range_raises(theme):
+    timeline = _selectable_timeline(theme)
+    with pytest.raises(ValueError):
+        timeline.select_clip(99)
+
+
+def test_set_clips_clears_selection_and_emits(theme):
+    timeline = _selectable_timeline(theme)
+    timeline.select_clip(1)
+    received = []
+    timeline.clip_selected.connect(received.append)
+    timeline.set_clips(_demo_clips())
+    assert timeline.selected_index() == -1
+    assert received == [-1]
+
+
+def test_set_clips_no_emit_when_no_prior_selection(theme):
+    timeline = _selectable_timeline(theme)
+    received = []
+    timeline.clip_selected.connect(received.append)
+    timeline.set_clips(_demo_clips())
+    assert received == []
