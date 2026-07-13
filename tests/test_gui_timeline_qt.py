@@ -954,7 +954,8 @@ def test_tick_advances_playhead(theme):
 
 
 def test_tick_at_end_stops_and_finishes(theme):
-    timeline = _selectable_timeline(theme, duration=10.0)
+    timeline = Timeline(theme, duration=10.0, tracks=["Video 1", "Audio 1"])
+    timeline.set_clips(_demo_clips())
     timeline.set_playhead(10.0)
     timeline.play()
     finished = []
@@ -969,7 +970,8 @@ def test_tick_at_end_stops_and_finishes(theme):
 
 
 def test_play_from_end_restarts_at_zero(theme):
-    timeline = _selectable_timeline(theme, duration=10.0)
+    timeline = Timeline(theme, duration=10.0, tracks=["Video 1", "Audio 1"])
+    timeline.set_clips(_demo_clips())
     timeline.set_playhead(10.0)
     timeline.play()
     assert timeline.playhead() == pytest.approx(0.0)
@@ -999,13 +1001,15 @@ def test_home_key_seeks_to_zero(theme):
 
 
 def test_end_key_seeks_to_duration(theme):
-    timeline = _selectable_timeline(theme, duration=45.0)
+    timeline = Timeline(theme, duration=45.0, tracks=["Video 1", "Audio 1"])
+    timeline.set_clips(_demo_clips())
     timeline.keyPressEvent(_KeyStub(Qt.Key.Key_End))
     assert timeline.playhead() == pytest.approx(45.0)
 
 
 def test_ruler_seek_maps_fraction_to_time(theme):
-    timeline = _selectable_timeline(theme, duration=100.0)
+    timeline = Timeline(theme, duration=100.0, tracks=["Video 1", "Audio 1"])
+    timeline.set_clips(_demo_clips())
     # Give the ruler a real width so the x -> time mapping is deterministic.
     timeline._ruler.resize(200, 20)
     timeline._seek_from_ruler(_PosStub(50.0))  # 50 / 200 = 0.25 -> 25.0s
@@ -1013,7 +1017,8 @@ def test_ruler_seek_maps_fraction_to_time(theme):
 
 
 def test_ruler_seek_zero_width_is_noop(theme):
-    timeline = _selectable_timeline(theme, duration=100.0)
+    timeline = Timeline(theme, duration=100.0, tracks=["Video 1", "Audio 1"])
+    timeline.set_clips(_demo_clips())
     timeline._ruler.resize(0, 20)
     timeline.set_playhead(10.0)
     timeline._seek_from_ruler(_PosStub(50.0))
