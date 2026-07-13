@@ -106,6 +106,15 @@ class _MediaWorkspace(QWidget):
         # A trim likewise updates start/length without re-emitting
         # clip_selected, so refresh the inspector on clip_trimmed too.
         self._timeline.clip_trimmed.connect(self._on_clip_trimmed)
+        # Playback wiring (Milestone 9): the transport drives the timeline
+        # playhead, and the timeline keeps the transport in sync.
+        self._transport.play_requested.connect(self._timeline.play)
+        self._transport.pause_requested.connect(self._timeline.pause)
+        self._transport.stop_requested.connect(self._timeline.stop)
+        self._timeline.playback_state_changed.connect(
+            self._on_playback_state_changed
+        )
+        self._timeline.playhead_changed.connect(self._on_playhead_changed)
 
     # ------------------------------------------------------------------ #
     # Region builders
@@ -302,6 +311,20 @@ class _MediaWorkspace(QWidget):
         the currently selected clip so the inspector reflects its new bounds.
         """
         self._clip_inspector.show_clip(self._timeline.selected_clip())
+
+    def _on_playback_state_changed(self, state: str) -> None:
+        """Mirror the timeline transport state onto the TransportBar (UI-only)."""
+        self._transport.set_state(state)
+
+    def _on_playhead_changed(self, seconds: float) -> None:
+        """Reflect the timeline playhead on the TransportBar's seek position.
+
+        Normalizes the playhead time to the timeline duration; set_position
+        clamps and does not re-emit seek_requested, so there is no loop.
+        """
+        duration = self._timeline.duration()
+        fraction = seconds / duration if duration > 0 else 0.0
+        self._transport.set_position(fraction)
 
 
 def build_media_workspace_screen(theme: ThemeManager) -> QWidget:
