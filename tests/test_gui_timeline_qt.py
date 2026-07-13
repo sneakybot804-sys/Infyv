@@ -407,12 +407,13 @@ def _mouse_event(kind, widget, local, button, buttons):
     DeprecationWarnings are tracked as tech debt and are not addressed in
     Milestone 6.
     """
+    # Local and global positions are both QPointF(local): the offscreen tests
+    # never rely on the global coordinate (the production _finish_drag resolves
+    # the drop destination from the release event's target lane).
     return QMouseEvent(
         kind,
         QPointF(local),
-        widget.mapToGlobal(widget.rect().topLeft()) + local
-        if False
-        else QPointF(local),
+        QPointF(local),
         button,
         buttons,
         Qt.KeyboardModifier.NoModifier,
