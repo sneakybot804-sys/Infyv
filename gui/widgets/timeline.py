@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -110,6 +110,8 @@ class Timeline(ThemedWidget):
         self._tracks_layout.setContentsMargins(0, 0, 0, 0)
         self._tracks_layout.setSpacing(tokens.spacing.xs)
         self._column.addWidget(self._tracks_container, 1)
+        # Empty-space clicks (on the tracks background) clear the selection.
+        self._tracks_container.installEventFilter(self)
 
         # Playhead marker (a thin vertical frame; position is illustrative).
         self._playhead_marker = QFrame(self)
@@ -161,6 +163,10 @@ class Timeline(ThemedWidget):
         )
         row.setSpacing(self.tokens.spacing.xs)
         row.addStretch(1)
+        # Empty-space clicks on a lane (no clip under the cursor) clear the
+        # selection; clip frames consume their own press first (see
+        # eventFilter), so they never reach the lane.
+        lane.installEventFilter(self)
         self._track_names.append(name)
         self._track_widgets.append(lane)
         self._tracks_layout.addWidget(lane)
@@ -311,10 +317,38 @@ class Timeline(ThemedWidget):
             block_layout.addWidget(caption)
             # Insert before the trailing stretch spacer.
             row.insertWidget(max(0, row.count() - 1), block)
+            # Left-click on a clip selects it (see eventFilter).
+            block.installEventFilter(self)
             self._clip_widgets.append(block)
 
         self.apply_theme()
         self._apply_selection_property()
+
+    # ------------------------------------------------------------------ #
+    # Mouse input (click-to-select; Phase 8H, Milestone 5)
+    # ------------------------------------------------------------------ #
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802 (Qt override)
+        """Left-click a clip to select it; click empty space to clear.
+
+        Click-only input plumbing: it drives the existing select_clip /
+        clear_selection API (no new public API, no drag/move/trim/split).
+        Returns ``True`` to consume a handled clip press so it does not also
+        reach the empty-space (lane / tracks) handler.
+        """
+        if event.type() == QEvent.Type.MouseButtonPress and (
+            event.button() == Qt.MouseButton.LeftButton
+        ):
+            # A clip frame: select its clip and consume the event.
+            for index, frame in enumerate(self._clip_widgets):
+                if frame is not None and watched is frame:
+                    self.select_clip(index)
+                    return True
+            # Otherwise the press landed on a lane or the tracks background
+            # (empty space): clear the selection.
+            if watched is self._tracks_container or watched in self._track_widgets:
+                self.clear_selection()
+                return False
+        return super().eventFilter(watched, event)
 
     def _apply_selection_property(self) -> None:
         """Set the ``selected`` dynamic property on the selected clip frame.
