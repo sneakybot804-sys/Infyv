@@ -31,6 +31,10 @@ from gui.widgets.section_header import SectionHeader
 #: A clip is a plain mapping (as produced by the Timeline widget).
 Clip = Dict[str, object]
 
+#: Placeholder shown for a missing field value (kept out of f-string
+#: expression braces so no backslash appears inside them).
+_DASH = "\u2014"
+
 
 class ClipInspector(ThemedWidget):
     """A read-only panel showing the selected clip's properties.
@@ -104,10 +108,10 @@ class ClipInspector(ThemedWidget):
             self.clear()
             return
         self._current = dict(clip)
-        self._field_label.set_text(f"Label: {clip.get('label', '\u2014')}")
-        self._field_track.set_text(f"Track: {clip.get('track', '\u2014')}")
-        self._field_start.set_text(f"Start: {clip.get('start', '\u2014')}")
-        self._field_length.set_text(f"Length: {clip.get('length', '\u2014')}")
+        self._field_label.set_text(f"Label: {clip.get('label', _DASH)}")
+        self._field_track.set_text(f"Track: {clip.get('track', _DASH)}")
+        self._field_start.set_text(f"Start: {clip.get('start', _DASH)}")
+        self._field_length.set_text(f"Length: {clip.get('length', _DASH)}")
         self._empty.setVisible(False)
         for field in self._fields:
             field.setVisible(True)
