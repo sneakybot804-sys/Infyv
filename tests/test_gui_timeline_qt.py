@@ -969,13 +969,21 @@ def test_tick_at_end_stops_and_finishes(theme):
     assert states == ["stopped"]
 
 
-def test_play_from_end_restarts_at_zero(theme):
+def test_play_at_end_finishes_on_first_tick(theme):
     timeline = Timeline(theme, duration=10.0, tracks=["Video 1", "Audio 1"])
     timeline.set_clips(_demo_clips())
     timeline.set_playhead(10.0)
+    finished = []
+    timeline.playback_finished.connect(lambda: finished.append(True))
+    # Playing at the end does NOT restart from 0.
     timeline.play()
-    assert timeline.playhead() == pytest.approx(0.0)
-    timeline.stop()
+    assert timeline.playhead() == pytest.approx(10.0)
+    assert timeline.is_playing() is True
+    # The first tick finishes playback immediately.
+    timeline._on_play_tick()
+    assert timeline.playhead() == pytest.approx(10.0)
+    assert timeline.playback_state() == "stopped"
+    assert finished == [True]
 
 
 def test_current_time_reflects_playhead(theme):
