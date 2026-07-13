@@ -222,13 +222,14 @@ class Timeline(ThemedWidget):
     def play(self) -> None:
         """Start (or resume) timer-driven playback from the playhead.
 
-        Starting at (or past) the end restarts from 0. A no-op when already
-        playing. Emits :attr:`playback_state_changed` on a state change.
+        A no-op when already playing. Playing while the playhead is already at
+        the end does NOT restart from 0: it enters 'playing' and the first
+        timer tick finishes playback immediately (see :meth:`_on_play_tick`),
+        leaving the playhead at the duration. Emits
+        :attr:`playback_state_changed` on a state change.
         """
         if self._playback_state == "playing":
             return
-        if self._playhead >= self._duration:
-            self.set_playhead(0.0)
         self._set_playback_state("playing")
         self._play_timer.start()
 
