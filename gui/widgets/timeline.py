@@ -64,6 +64,7 @@ class Timeline(ThemedWidget):
     playhead_changed = Signal(float)
     clip_selected = Signal(int)
     clip_moved = Signal(int, int)
+    clip_trimmed = Signal(int, float, float)
 
     def __init__(
         self,
@@ -100,6 +101,18 @@ class Timeline(ThemedWidget):
         self._drop_lane: Optional[QWidget] = None
         #: Movement (px) a press must exceed before it becomes a drag.
         self._drag_threshold = 4
+        # Trim state (Milestone 7). _drag_mode is 'move' (M6) or 'trim_left' /
+        # 'trim_right' (M7), chosen at arm time from the press position within
+        # the clip frame. _trimming marks an active trim; _trim_edge_zone is
+        # the edge hit-zone width (px); _px_per_second maps horizontal pointer
+        # movement to a seconds delta; _trim_origin snapshots the clip's
+        # (start, length) at arm time so live trimming is computed from a
+        # stable base.
+        self._drag_mode = "move"
+        self._trimming = False
+        self._trim_edge_zone = 8
+        self._px_per_second = 8.0
+        self._trim_origin: Optional[tuple] = None
 
         tokens = self.tokens
         self._column = QVBoxLayout(self)
@@ -268,9 +281,61 @@ class Timeline(ThemedWidget):
         self._rebuild_clips()
         self.clip_moved.emit(index, new_track)
 
+    def trim_clip(
+        self,
+        index: int,
+        *,
+        start: Optional[float] = None,
+        length: Optional[float] = None,
+    ) -> None:
+        """Resize the clip at ``index`` (programmatic core; start/length only).
+
+        Single source of truth for trimming; the edge-drag path calls it. It
+        changes ONLY the clip's ``start`` and ``length`` (never ``track`` or
+        ordering). ``start`` and/or ``length`` may be given; omitted values keep
+        their current value.
+
+        Values are clamped (never raised) to the approved interactive rules:
+        ``start >= 0``, ``length >= 1.0`` second, and ``start + length <=``
+        :meth:`duration`. When the clamped result equals the current values it
+        is a no-op and emits nothing; otherwise the model is updated, rebuilt,
+        and :attr:`clip_trimmed` is emitted with ``(index, start, length)``.
+        The selection index is preserved (``clip_selected`` is not re-emitted).
+
+        Raises:
+            ValueError: Only if ``index`` is out of range.
+        """
+        if not (0 <= index < len(self._clips)):
+            raise ValueError(f"clip index out of range: {index}")
+        clip = self._clips[index]
+        cur_start = float(clip.get("start", 0.0))
+        cur_length = float(clip.get("length", 0.0))
+        new_start = cur_start if start is None else float(start)
+        new_length = cur_length if length is None else float(length)
+        # Clamp: start >= 0, length >= 1.0s, start + length <= duration.
+        new_start = max(0.0, new_start)
+        new_length = max(1.0, new_length)
+        if new_start + new_length > self._duration:
+            # Prefer keeping the requested start; shrink length to fit, but
+            # never below the 1.0s minimum (pull start back if necessary).
+            new_length = self._duration - new_start
+            if new_length < 1.0:
+                new_length = 1.0
+                new_start = max(0.0, self._duration - new_length)
+        if new_start == cur_start and new_length == cur_length:
+            return
+        clip["start"] = new_start
+        clip["length"] = new_length
+        self._rebuild_clips()
+        self.clip_trimmed.emit(index, new_start, new_length)
+
     def is_dragging(self) -> bool:
         """Return ``True`` while a clip drag is in progress (read-only)."""
         return self._drag_active
+
+    def is_trimming(self) -> bool:
+        """Return ``True`` while a clip trim is in progress (read-only)."""
+        return self._trimming
 
     def clear_selection(self) -> None:
         """Clear the current clip selection (to ``-1``); idempotent.
@@ -423,19 +488,71 @@ class Timeline(ThemedWidget):
         self._drag_armed = True
         self._drag_active = False
         self._drag_press_pos = event.position()
+        # Classify the grab: a press within the edge zone of the clip frame is
+        # a trim (left/right); otherwise it is a move (M6). Snapshot the clip's
+        # start/length so live trimming is computed from a stable base.
+        self._drag_mode = "move"
+        self._trim_origin = None
+        frame = self._clip_widgets[index] if 0 <= index < len(self._clip_widgets) else None
+        if frame is not None:
+            width = frame.width()
+            x = event.position().x()
+            if x <= self._trim_edge_zone:
+                self._drag_mode = "trim_left"
+            elif width and x >= width - self._trim_edge_zone:
+                self._drag_mode = "trim_right"
+            clip = self._clips[index]
+            self._trim_origin = (
+                float(clip.get("start", 0.0)),
+                float(clip.get("length", 0.0)),
+            )
 
     def _update_drag(self, event) -> None:
-        """Activate the drag past the threshold and preview the hovered lane."""
+        """Activate past the threshold; trim on an edge grab, else preview lane."""
         if not self._drag_active and self._drag_press_pos is not None:
             delta = event.position() - self._drag_press_pos
             if max(abs(delta.x()), abs(delta.y())) < self._drag_threshold:
                 return
             self._drag_active = True
+        if self._drag_mode in ("trim_left", "trim_right"):
+            self._trimming = True
+            self._apply_trim(event)
+            return
         lane = self._lane_at(event)
         self._set_drop_target(lane)
 
+    def _apply_trim(self, event) -> None:
+        """Apply a live edge trim from the pointer movement (Milestone 7).
+
+        Left trim holds the right edge fixed (adjusts start, compensating
+        length); right trim holds the left edge fixed (adjusts length). The
+        horizontal pointer delta is mapped to seconds via _px_per_second and
+        applied through trim_clip, which clamps to the approved rules.
+        """
+        if self._trim_origin is None or self._drag_press_pos is None:
+            return
+        start0, length0 = self._trim_origin
+        dx = event.position().x() - self._drag_press_pos.x()
+        delta_seconds = dx / self._px_per_second
+        if self._drag_mode == "trim_left":
+            right_edge = start0 + length0
+            new_start = start0 + delta_seconds
+            self.trim_clip(
+                self._drag_index,
+                start=new_start,
+                length=right_edge - new_start,
+            )
+        else:  # trim_right: hold the left edge, adjust length.
+            self.trim_clip(
+                self._drag_index, length=length0 + delta_seconds
+            )
+
     def _finish_drag(self, watched) -> None:
-        """Resolve the destination lane and commit the move if it changed."""
+        """Commit the interaction: a trim is already applied live; else move."""
+        if self._drag_mode in ("trim_left", "trim_right"):
+            # The trim was applied live during _update_drag; just reset state.
+            self._reset_drag()
+            return
         armed_active = self._drag_active
         drag_index = self._drag_index
         dest_lane = self._lane_of(watched)
@@ -450,11 +567,14 @@ class Timeline(ThemedWidget):
         self.move_clip(drag_index, dest_track)
 
     def _reset_drag(self) -> None:
-        """Clear all pending/active drag state."""
+        """Clear all pending/active drag and trim state."""
         self._drag_index = -1
         self._drag_armed = False
         self._drag_active = False
         self._drag_press_pos = None
+        self._drag_mode = "move"
+        self._trimming = False
+        self._trim_origin = None
 
     def _lane_of(self, widget) -> Optional[QWidget]:
         """Return the ``TimelineTrack`` lane owning ``widget`` (self included)."""
