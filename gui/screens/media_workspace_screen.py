@@ -103,6 +103,9 @@ class _MediaWorkspace(QWidget):
         # A drag-move updates the clip model without re-emitting clip_selected,
         # so refresh the inspector on clip_moved to keep it in sync.
         self._timeline.clip_moved.connect(self._on_clip_moved)
+        # A trim likewise updates start/length without re-emitting
+        # clip_selected, so refresh the inspector on clip_trimmed too.
+        self._timeline.clip_trimmed.connect(self._on_clip_trimmed)
 
     # ------------------------------------------------------------------ #
     # Region builders
@@ -288,6 +291,15 @@ class _MediaWorkspace(QWidget):
         A drag-move changes the clip's track without changing the selection
         index (so :attr:`clip_selected` is not re-emitted); re-show the
         currently selected clip so the inspector reflects its new track.
+        """
+        self._clip_inspector.show_clip(self._timeline.selected_clip())
+
+    def _on_clip_trimmed(self, index: int, start: float, length: float) -> None:
+        """Refresh the clip inspector after a timeline clip is trimmed (UI-only).
+
+        An edge trim changes the clip's start/length without changing the
+        selection index (so :attr:`clip_selected` is not re-emitted); re-show
+        the currently selected clip so the inspector reflects its new bounds.
         """
         self._clip_inspector.show_clip(self._timeline.selected_clip())
 
