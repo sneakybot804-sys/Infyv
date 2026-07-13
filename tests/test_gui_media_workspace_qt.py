@@ -21,7 +21,7 @@ from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
 from gui.screens.media_workspace_screen import build_media_workspace_screen  # noqa: E402
 from gui.theme.manager import ThemeManager  # noqa: E402
-from gui.widgets import MediaBrowser, TransportBar  # noqa: E402
+from gui.widgets import ClipInspector, MediaBrowser, TransportBar  # noqa: E402
 from gui.widgets.section_header import SectionHeader  # noqa: E402
 from gui.widgets.timeline import Timeline  # noqa: E402
 
@@ -131,3 +131,41 @@ def test_timeline_region_present(theme):
 def test_embeds_timeline(theme):
     screen = build_media_workspace_screen(theme)
     assert screen.findChildren(Timeline)
+
+
+# ---------------------------------------------------------------------- #
+# Clip inspector integration (Phase 8H, Milestone 4)
+# ---------------------------------------------------------------------- #
+def test_inspector_region_present(theme):
+    screen = build_media_workspace_screen(theme)
+    assert _find(screen, "MediaWorkspaceInspector") is not None
+
+
+def test_embeds_clip_inspector(theme):
+    screen = build_media_workspace_screen(theme)
+    assert screen.findChildren(ClipInspector)
+
+
+def test_inspector_starts_empty(theme):
+    screen = build_media_workspace_screen(theme)
+    inspector = screen.findChildren(ClipInspector)[0]
+    assert inspector.is_empty() is True
+
+
+def test_selecting_timeline_clip_updates_inspector(theme):
+    screen = build_media_workspace_screen(theme)
+    timeline = screen.findChildren(Timeline)[0]
+    inspector = screen.findChildren(ClipInspector)[0]
+    # The screen seeds the timeline with clips; select the first one.
+    timeline.select_clip(0)
+    assert inspector.is_empty() is False
+    assert inspector.current() == timeline.selected_clip()
+
+
+def test_clearing_timeline_selection_empties_inspector(theme):
+    screen = build_media_workspace_screen(theme)
+    timeline = screen.findChildren(Timeline)[0]
+    inspector = screen.findChildren(ClipInspector)[0]
+    timeline.select_clip(0)
+    timeline.clear_selection()
+    assert inspector.is_empty() is True
