@@ -851,3 +851,192 @@ def test_zoom_preserves_selection_and_emits_no_clip_signals(theme):
     assert selected == []
     assert moved == []
     assert trimmed == []
+
+
+# ---------------------------------------------------------------------- #
+# Playback & playhead (Phase 8H, Milestone 9)
+# ---------------------------------------------------------------------- #
+class _KeyStub:
+    """Minimal stand-in for a key event (key() + accept())."""
+
+    def __init__(self, key):
+        self._key = key
+
+    def key(self):
+        return self._key
+
+    def accept(self):
+        pass
+
+
+class _PosStub:
+    """Minimal stand-in for a mouse event exposing position().x() / accept()."""
+
+    class _Pos:
+        def __init__(self, x):
+            self._x = x
+
+        def x(self):
+            return self._x
+
+    def __init__(self, x):
+        self._pos = self._Pos(x)
+
+    def position(self):
+        return self._pos
+
+    def accept(self):
+        pass
+
+
+def test_playback_state_default(theme):
+    timeline = _selectable_timeline(theme)
+    assert timeline.playback_state() == "stopped"
+    assert timeline.is_playing() is False
+
+
+def test_play_sets_playing_and_emits(theme):
+    timeline = _selectable_timeline(theme)
+    received = []
+    timeline.playback_state_changed.connect(received.append)
+    timeline.play()
+    assert timeline.is_playing() is True
+    assert timeline.playback_state() == "playing"
+    assert received == ["playing"]
+    # A second play is a no-op (no duplicate emission).
+    timeline.play()
+    assert received == ["playing"]
+    timeline.stop()  # leave the timer stopped
+
+
+def test_pause_from_playing_emits_once(theme):
+    timeline = _selectable_timeline(theme)
+    timeline.play()
+    received = []
+    timeline.playback_state_changed.connect(received.append)
+    timeline.pause()
+    assert timeline.playback_state() == "paused"
+    assert received == ["paused"]
+    # Pausing when not playing is a no-op.
+    timeline.pause()
+    assert received == ["paused"]
+
+
+def test_stop_resets_playhead(theme):
+    timeline = _selectable_timeline(theme)
+    timeline.set_playhead(20.0)
+    timeline.play()
+    received = []
+    timeline.playback_state_changed.connect(received.append)
+    timeline.stop()
+    assert timeline.playback_state() == "stopped"
+    assert timeline.playhead() == pytest.approx(0.0)
+    assert received == ["stopped"]
+
+
+def test_toggle_play_toggles(theme):
+    timeline = _selectable_timeline(theme)
+    timeline.toggle_play()
+    assert timeline.is_playing() is True
+    timeline.toggle_play()
+    assert timeline.playback_state() == "paused"
+    timeline.stop()
+
+
+def test_tick_advances_playhead(theme):
+    timeline = _selectable_timeline(theme)
+    timeline.set_playhead(0.0)
+    received = []
+    timeline.playhead_changed.connect(received.append)
+    timeline._on_play_tick()
+    assert timeline.playhead() > 0.0
+    assert len(received) == 1
+
+
+def test_tick_at_end_stops_and_finishes(theme):
+    timeline = _selectable_timeline(theme, duration=10.0)
+    timeline.set_playhead(10.0)
+    timeline.play()
+    finished = []
+    states = []
+    timeline.playback_finished.connect(lambda: finished.append(True))
+    timeline.playback_state_changed.connect(states.append)
+    timeline._on_play_tick()
+    assert timeline.playhead() == pytest.approx(10.0)
+    assert timeline.playback_state() == "stopped"
+    assert finished == [True]
+    assert states == ["stopped"]
+
+
+def test_play_from_end_restarts_at_zero(theme):
+    timeline = _selectable_timeline(theme, duration=10.0)
+    timeline.set_playhead(10.0)
+    timeline.play()
+    assert timeline.playhead() == pytest.approx(0.0)
+    timeline.stop()
+
+
+def test_current_time_reflects_playhead(theme):
+    timeline = _selectable_timeline(theme)
+    timeline.set_playhead(7.5)
+    assert timeline.current_time() == pytest.approx(7.5)
+
+
+def test_space_key_toggles_play(theme):
+    timeline = _selectable_timeline(theme)
+    timeline.keyPressEvent(_KeyStub(Qt.Key.Key_Space))
+    assert timeline.is_playing() is True
+    timeline.keyPressEvent(_KeyStub(Qt.Key.Key_Space))
+    assert timeline.playback_state() == "paused"
+    timeline.stop()
+
+
+def test_home_key_seeks_to_zero(theme):
+    timeline = _selectable_timeline(theme)
+    timeline.set_playhead(30.0)
+    timeline.keyPressEvent(_KeyStub(Qt.Key.Key_Home))
+    assert timeline.playhead() == pytest.approx(0.0)
+
+
+def test_end_key_seeks_to_duration(theme):
+    timeline = _selectable_timeline(theme, duration=45.0)
+    timeline.keyPressEvent(_KeyStub(Qt.Key.Key_End))
+    assert timeline.playhead() == pytest.approx(45.0)
+
+
+def test_ruler_seek_maps_fraction_to_time(theme):
+    timeline = _selectable_timeline(theme, duration=100.0)
+    # Give the ruler a real width so the x -> time mapping is deterministic.
+    timeline._ruler.resize(200, 20)
+    timeline._seek_from_ruler(_PosStub(50.0))  # 50 / 200 = 0.25 -> 25.0s
+    assert timeline.playhead() == pytest.approx(25.0)
+
+
+def test_ruler_seek_zero_width_is_noop(theme):
+    timeline = _selectable_timeline(theme, duration=100.0)
+    timeline._ruler.resize(0, 20)
+    timeline.set_playhead(10.0)
+    timeline._seek_from_ruler(_PosStub(50.0))
+    # No usable width -> no change.
+    assert timeline.playhead() == pytest.approx(10.0)
+
+
+def test_playback_emits_no_clip_signals_and_preserves_selection(theme):
+    timeline = _selectable_timeline(theme)
+    timeline.select_clip(1)  # "Gameplay"
+    selected = []
+    moved = []
+    trimmed = []
+    timeline.clip_selected.connect(selected.append)
+    timeline.clip_moved.connect(lambda i, t: moved.append((i, t)))
+    timeline.clip_trimmed.connect(lambda i, s, ln: trimmed.append((i, s, ln)))
+    timeline.play()
+    timeline._on_play_tick()
+    timeline.pause()
+    timeline.set_playhead(5.0)
+    # Playback/seek is playhead-only: no clip signal fires, selection intact.
+    assert selected == []
+    assert moved == []
+    assert trimmed == []
+    assert timeline.selected_index() == 1
+    timeline.stop()
