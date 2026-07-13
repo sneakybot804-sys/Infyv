@@ -395,3 +395,163 @@ def test_click_selected_clip_is_noop(theme):
     _left_click(_clip_frame(timeline, "Gameplay"))
     assert timeline.selected_index() == 1
     assert received == []
+
+
+# ---------------------------------------------------------------------- #
+# Drag & drop foundation (Phase 8H, Milestone 6; track-only move)
+# ---------------------------------------------------------------------- #
+def _mouse_event(kind, widget, local, button, buttons):
+    """Build a QMouseEvent of *kind* at *local* on *widget*.
+
+    The deprecated 5-argument constructor is used deliberately; the resulting
+    DeprecationWarnings are tracked as tech debt and are not addressed in
+    Milestone 6.
+    """
+    return QMouseEvent(
+        kind,
+        QPointF(local),
+        widget.mapToGlobal(widget.rect().topLeft()) + local
+        if False
+        else QPointF(local),
+        button,
+        buttons,
+        Qt.KeyboardModifier.NoModifier,
+    )
+
+
+def _press(widget, local):
+    QApplication.instance().sendEvent(
+        widget,
+        _mouse_event(
+            QEvent.Type.MouseButtonPress,
+            widget,
+            local,
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton,
+        ),
+    )
+
+
+def _move(widget, local):
+    QApplication.instance().sendEvent(
+        widget,
+        _mouse_event(
+            QEvent.Type.MouseMove,
+            widget,
+            local,
+            Qt.MouseButton.NoButton,
+            Qt.MouseButton.LeftButton,
+        ),
+    )
+
+
+def _release(widget, local):
+    QApplication.instance().sendEvent(
+        widget,
+        _mouse_event(
+            QEvent.Type.MouseButtonRelease,
+            widget,
+            local,
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.NoButton,
+        ),
+    )
+
+
+def _drag_clip_to_lane(timeline, clip_frame, dest_lane):
+    """Press the clip, move past the threshold, release over *dest_lane*.
+
+    The release is delivered to the destination lane so the production
+    _finish_drag resolves the destination from the event target's lane
+    ancestry (geometry-free / offscreen-safe).
+    """
+    _press(clip_frame, QPointF(1.0, 1.0))
+    # A far move crosses the widget's movement threshold and activates drag.
+    _move(clip_frame, QPointF(40.0, 40.0))
+    _release(dest_lane, QPointF(2.0, 2.0))
+
+
+def _lane(timeline, index):
+    """Return the TimelineTrack lane widget at *index* (by creation order)."""
+    lanes = [
+        w for w in timeline.findChildren(QWidget)
+        if w.objectName() == "TimelineTrack"
+    ]
+    return lanes[index]
+
+
+def test_drag_across_tracks_updates_model(theme):
+    timeline = _selectable_timeline(theme)
+    # "Intro" is index 0 on track 0; drag it to track 1.
+    received = []
+    timeline.clip_moved.connect(lambda i, t: received.append((i, t)))
+    _drag_clip_to_lane(timeline, _clip_frame(timeline, "Intro"), _lane(timeline, 1))
+    moved = timeline.clips()[0]
+    assert moved["label"] == "Intro"
+    assert moved["track"] == 1
+    # Only the track changed; start/length are untouched.
+    assert moved["start"] == pytest.approx(0.0)
+    assert moved["length"] == pytest.approx(12.0)
+    assert received == [(0, 1)]
+
+
+def test_drag_emits_clip_moved_once(theme):
+    timeline = _selectable_timeline(theme)
+    received = []
+    timeline.clip_moved.connect(lambda i, t: received.append((i, t)))
+    _drag_clip_to_lane(timeline, _clip_frame(timeline, "Intro"), _lane(timeline, 1))
+    assert len(received) == 1
+
+
+def test_drop_on_origin_track_is_noop(theme):
+    timeline = _selectable_timeline(theme)
+    before = timeline.clips()
+    received = []
+    timeline.clip_moved.connect(lambda i, t: received.append((i, t)))
+    # "Intro" is on track 0; drop it back on track 0.
+    _drag_clip_to_lane(timeline, _clip_frame(timeline, "Intro"), _lane(timeline, 0))
+    assert timeline.clips() == before
+    assert received == []
+
+
+def test_selection_preserved_after_move(theme):
+    timeline = _selectable_timeline(theme)
+    timeline.select_clip(0)  # select "Intro"
+    assert timeline.selected_index() == 0
+    _drag_clip_to_lane(timeline, _clip_frame(timeline, "Intro"), _lane(timeline, 1))
+    assert timeline.selected_index() == 0
+    assert timeline.selected_clip()["label"] == "Intro"
+    assert timeline.selected_clip()["track"] == 1
+
+
+def test_is_dragging_false_before_and_after(theme):
+    timeline = _selectable_timeline(theme)
+    assert timeline.is_dragging() is False
+    _drag_clip_to_lane(timeline, _clip_frame(timeline, "Intro"), _lane(timeline, 1))
+    assert timeline.is_dragging() is False
+
+
+def test_drop_target_property_set_and_cleared(theme):
+    timeline = _selectable_timeline(theme)
+    lane = _lane(timeline, 1)
+    # Exercise the production preview mechanism directly (geometry-free).
+    timeline._set_drop_target(lane)
+    assert lane.property("dropTarget") is True
+    timeline._set_drop_target(None)
+    assert lane.property("dropTarget") is False
+
+
+def test_subthreshold_drag_behaves_as_click(theme):
+    timeline = _selectable_timeline(theme)
+    received = []
+    timeline.clip_moved.connect(lambda i, t: received.append((i, t)))
+    before = timeline.clips()
+    frame = _clip_frame(timeline, "Gameplay")  # index 1
+    _press(frame, QPointF(1.0, 1.0))
+    # A tiny move (below the threshold) must not activate a drag.
+    _move(frame, QPointF(2.0, 2.0))
+    _release(frame, QPointF(2.0, 2.0))
+    # Behaves as a plain click: selected, no move committed, model unchanged.
+    assert timeline.selected_index() == 1
+    assert received == []
+    assert timeline.clips() == before
