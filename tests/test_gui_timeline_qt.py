@@ -16,6 +16,8 @@ pytest.importorskip("PySide6")
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import QEvent, QPointF, Qt  # noqa: E402
+from PySide6.QtGui import QMouseEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
 from gui.theme.manager import ThemeManager  # noqa: E402
@@ -291,4 +293,105 @@ def test_set_clips_no_emit_when_no_prior_selection(theme):
     received = []
     timeline.clip_selected.connect(received.append)
     timeline.set_clips(_demo_clips())
+    assert received == []
+
+
+# ---------------------------------------------------------------------- #
+# Click-to-select (Phase 8H, Milestone 5; mouse interaction)
+# ---------------------------------------------------------------------- #
+def _left_click(widget):
+    """Dispatch a synthetic left-button press to *widget*.
+
+    Geometry-free and offscreen-safe: the QMouseEvent is delivered straight to
+    the target with QApplication.sendEvent, so Timeline's installed event
+    filter runs regardless of widget visibility or layout geometry (the widgets
+    are never shown in these tests). Selection triggers on MouseButtonPress.
+    """
+    event = QMouseEvent(
+        QEvent.Type.MouseButtonPress,
+        QPointF(1.0, 1.0),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    QApplication.instance().sendEvent(widget, event)
+
+
+def _clip_frame(timeline, label):
+    """Return the TimelineClip frame whose label caption matches *label*.
+
+    Located by caption text rather than child-traversal order so the tests do
+    not depend on findChildren ordering.
+    """
+    for frame in timeline.findChildren(QWidget):
+        if frame.objectName() != "TimelineClip":
+            continue
+        for child in frame.findChildren(QWidget):
+            if (
+                child.objectName() == "TimelineClipLabel"
+                and child.text() == label
+            ):
+                return frame
+    return None
+
+
+def test_click_clip_selects_it(theme):
+    timeline = _selectable_timeline(theme)
+    received = []
+    timeline.clip_selected.connect(received.append)
+    frame = _clip_frame(timeline, "Gameplay")
+    assert frame is not None
+    _left_click(frame)
+    assert timeline.selected_index() == 1
+    assert timeline.selected_clip()["label"] == "Gameplay"
+    assert received == [1]
+
+
+def test_click_another_clip_moves_selection(theme):
+    timeline = _selectable_timeline(theme)
+    _left_click(_clip_frame(timeline, "Intro"))
+    assert timeline.selected_index() == 0
+    received = []
+    timeline.clip_selected.connect(received.append)
+    _left_click(_clip_frame(timeline, "Music"))
+    assert timeline.selected_index() == 2
+    assert timeline.selected_clip()["label"] == "Music"
+    assert received == [2]
+
+
+def test_click_empty_space_clears_selection(theme):
+    timeline = _selectable_timeline(theme)
+    _left_click(_clip_frame(timeline, "Intro"))
+    assert timeline.selected_index() == 0
+    received = []
+    timeline.clip_selected.connect(received.append)
+    tracks_bg = _find(timeline, "TimelineTracks")
+    assert tracks_bg is not None
+    _left_click(tracks_bg)
+    assert timeline.selected_index() == -1
+    assert timeline.selected_clip() is None
+    assert received == [-1]
+
+
+def test_click_empty_lane_clears_selection(theme):
+    timeline = _selectable_timeline(theme)
+    _left_click(_clip_frame(timeline, "Intro"))
+    assert timeline.selected_index() == 0
+    received = []
+    timeline.clip_selected.connect(received.append)
+    lane = _find(timeline, "TimelineTrack")
+    assert lane is not None
+    _left_click(lane)
+    assert timeline.selected_index() == -1
+    assert received == [-1]
+
+
+def test_click_selected_clip_is_noop(theme):
+    timeline = _selectable_timeline(theme)
+    _left_click(_clip_frame(timeline, "Gameplay"))
+    assert timeline.selected_index() == 1
+    received = []
+    timeline.clip_selected.connect(received.append)
+    _left_click(_clip_frame(timeline, "Gameplay"))
+    assert timeline.selected_index() == 1
     assert received == []
