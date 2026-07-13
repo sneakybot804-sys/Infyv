@@ -23,6 +23,7 @@ from gui.screens.media_workspace_screen import build_media_workspace_screen  # n
 from gui.theme.manager import ThemeManager  # noqa: E402
 from gui.widgets import MediaBrowser, TransportBar  # noqa: E402
 from gui.widgets.section_header import SectionHeader  # noqa: E402
+from gui.widgets.timeline import Timeline  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -117,3 +118,16 @@ def test_clearing_selection_resets_details(theme):
     browser.select(0)
     browser.select(-1)
     assert header.subtitle() == "No clip selected"
+
+
+# ---------------------------------------------------------------------- #
+# Timeline integration (Phase 8H, Milestone 3)
+# ---------------------------------------------------------------------- #
+def test_timeline_region_present(theme):
+    screen = build_media_workspace_screen(theme)
+    assert _find(screen, "MediaWorkspaceTimeline") is not None
+
+
+def test_embeds_timeline(theme):
+    screen = build_media_workspace_screen(theme)
+    assert screen.findChildren(Timeline)
