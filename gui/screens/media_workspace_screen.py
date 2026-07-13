@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 )
 
 from gui.theme.manager import ThemeManager
+from gui.widgets.clip_inspector import ClipInspector
 from gui.widgets.glass_card import GlassCard
 from gui.widgets.media_browser import MediaBrowser
 from gui.widgets.meta_label import MetaLabel
@@ -85,16 +86,20 @@ class _MediaWorkspace(QWidget):
         splitter.addWidget(self._browser)
         splitter.addWidget(self._build_preview())
         splitter.addWidget(self._build_details())
+        splitter.addWidget(self._build_inspector())
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setStretchFactor(2, 0)
+        splitter.setStretchFactor(3, 0)
         root.addWidget(splitter, 1)
 
         # Bottom Timeline region (additive; below the splitter).
         root.addWidget(self._build_timeline())
 
-        # Screen-level, UI-only wiring: selection updates preview + details.
+        # Screen-level, UI-only wiring: media selection updates preview +
+        # details; timeline clip selection updates the clip inspector.
         self._browser.selection_changed.connect(self._on_selection_changed)
+        self._timeline.clip_selected.connect(self._on_clip_selected)
 
     # ------------------------------------------------------------------ #
     # Region builders
@@ -173,6 +178,38 @@ class _MediaWorkspace(QWidget):
         layout.addWidget(card, 1)
         return details
 
+    def _build_inspector(self) -> QWidget:
+        """Build the right ClipInspector region (UI-only, read-only).
+
+        Separate from the media details panel: this reflects the *selected
+        timeline clip*, not the selected media item.
+        """
+        tokens = self._theme.tokens
+
+        region = QWidget()
+        region.setObjectName("MediaWorkspaceInspector")
+        region.setMinimumWidth(260)
+        layout = QVBoxLayout(region)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(tokens.spacing.md)
+
+        card = GlassCard(self._theme, glow=None, elevation="medium")
+        card.setObjectName("MediaWorkspaceInspectorCard")
+        content = QWidget()
+        inner = QVBoxLayout(content)
+        inner.setContentsMargins(
+            tokens.spacing.lg, tokens.spacing.lg, tokens.spacing.lg, tokens.spacing.lg
+        )
+        inner.setSpacing(tokens.spacing.sm)
+
+        self._clip_inspector = ClipInspector(self._theme)
+        inner.addWidget(self._clip_inspector)
+        inner.addStretch(1)
+
+        card.set_content(content)
+        layout.addWidget(card, 1)
+        return region
+
     def _build_timeline(self) -> QWidget:
         """Build the bottom Timeline region (UI-only; static demo clips)."""
         tokens = self._theme.tokens
@@ -233,6 +270,14 @@ class _MediaWorkspace(QWidget):
         self._detail_name.set_text(f"Name: {item}")
         self._detail_kind.set_text("Type: video/mp4")
         self._detail_status.set_text("Status: ready")
+
+    def _on_clip_selected(self, index: int) -> None:
+        """Update the clip inspector from the timeline selection (UI-only).
+
+        Reflects the timeline's currently selected clip; a cleared selection
+        (``index == -1``) returns the inspector to its empty state.
+        """
+        self._clip_inspector.show_clip(self._timeline.selected_clip())
 
 
 def build_media_workspace_screen(theme: ThemeManager) -> QWidget:
