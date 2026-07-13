@@ -59,11 +59,17 @@ def build_workspace_window(theme: ThemeManager) -> QMainWindow:
     window.setObjectName("WorkspaceMainWindow")
     window.setWindowTitle("AI Gaming Video Editor \u2014 Workspace")
 
-    # Central content: the frozen media workspace screen.
-    window.setCentralWidget(build_media_workspace_screen(theme))
+    # Central content: the frozen media workspace screen. The host names the
+    # central-widget instance WorkspaceScreen (the embedded screen keeps its
+    # own frozen object name internally).
+    central = build_media_workspace_screen(theme)
+    central.setObjectName("WorkspaceScreen")
+    window.setCentralWidget(central)
 
-    # Menu bar (created on access).
-    window.menuBar()
+    # Menu bar with the top-level menus.
+    menu_bar = window.menuBar()
+    for title in ("File", "Edit", "View", "AI", "Help"):
+        menu_bar.addMenu(title)
 
     # Main toolbar.
     toolbar = QToolBar("Main", window)
