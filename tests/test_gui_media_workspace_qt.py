@@ -238,3 +238,152 @@ def test_clicking_empty_timeline_space_empties_inspector(theme):
 
     assert timeline.selected_index() == -1
     assert inspector.is_empty() is True
+
+
+# ---------------------------------------------------------------------- #
+# Drag-move end-to-end (Phase 8H, Milestone 6; inspector stays in sync)
+# ---------------------------------------------------------------------- #
+def _mouse_event(kind, local, button, buttons):
+    """Build a QMouseEvent of *kind* at *local* (local == global position).
+
+    The deprecated 5-argument constructor is used deliberately; the resulting
+    DeprecationWarnings are tracked as tech debt and are not addressed in
+    Milestone 6. The offscreen tests never rely on the global coordinate (the
+    production _finish_drag resolves the drop destination from the release
+    event's target lane).
+    """
+    return QMouseEvent(
+        kind,
+        QPointF(local),
+        QPointF(local),
+        button,
+        buttons,
+        Qt.KeyboardModifier.NoModifier,
+    )
+
+
+def _press(widget, local):
+    QApplication.instance().sendEvent(
+        widget,
+        _mouse_event(
+            QEvent.Type.MouseButtonPress,
+            local,
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton,
+        ),
+    )
+
+
+def _move(widget, local):
+    QApplication.instance().sendEvent(
+        widget,
+        _mouse_event(
+            QEvent.Type.MouseMove,
+            local,
+            Qt.MouseButton.NoButton,
+            Qt.MouseButton.LeftButton,
+        ),
+    )
+
+
+def _release(widget, local):
+    QApplication.instance().sendEvent(
+        widget,
+        _mouse_event(
+            QEvent.Type.MouseButtonRelease,
+            local,
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.NoButton,
+        ),
+    )
+
+
+def _clip_frame_by_label(timeline, label):
+    """Return the TimelineClip frame whose caption text matches *label*."""
+    for frame in timeline.findChildren(QWidget):
+        if frame.objectName() != "TimelineClip":
+            continue
+        for child in frame.findChildren(QWidget):
+            if child.objectName() == "TimelineClipLabel" and child.text() == label:
+                return frame
+    return None
+
+
+def _lane(timeline, index):
+    """Return the TimelineTrack lane widget at *index* (by creation order)."""
+    lanes = [
+        w for w in timeline.findChildren(QWidget)
+        if w.objectName() == "TimelineTrack"
+    ]
+    return lanes[index]
+
+
+def _drag_clip_to_lane(clip_frame, dest_lane):
+    """Press the clip, move past the threshold, release over *dest_lane*."""
+    _press(clip_frame, QPointF(1.0, 1.0))
+    _move(clip_frame, QPointF(40.0, 40.0))
+    _release(dest_lane, QPointF(2.0, 2.0))
+
+
+def test_dragging_clip_updates_inspector_track(theme):
+    screen = build_media_workspace_screen(theme)
+    timeline = screen.findChildren(Timeline)[0]
+    inspector = screen.findChildren(ClipInspector)[0]
+    # "Intro" is index 0 on track 0; select it so the inspector shows it.
+    timeline.select_clip(0)
+    assert inspector.current()["track"] == 0
+
+    received = []
+    timeline.clip_moved.connect(lambda i, t: received.append((i, t)))
+    _drag_clip_to_lane(_clip_frame_by_label(timeline, "Intro"), _lane(timeline, 1))
+
+    # Full path: drag -> move_clip -> clip_moved -> _on_clip_moved -> show_clip.
+    assert received == [(0, 1)]
+    assert inspector.is_empty() is False
+    assert inspector.current()["label"] == "Intro"
+    assert inspector.current()["track"] == 1
+    assert inspector.current() == timeline.selected_clip()
+
+
+def test_drag_onto_origin_track_is_noop_for_inspector(theme):
+    screen = build_media_workspace_screen(theme)
+    timeline = screen.findChildren(Timeline)[0]
+    inspector = screen.findChildren(ClipInspector)[0]
+    timeline.select_clip(0)  # "Intro" on track 0
+    before = inspector.current()
+
+    received = []
+    timeline.clip_moved.connect(lambda i, t: received.append((i, t)))
+    # Drop "Intro" back onto track 0.
+    _drag_clip_to_lane(_clip_frame_by_label(timeline, "Intro"), _lane(timeline, 0))
+
+    assert received == []
+    assert inspector.current() == before
+    assert inspector.current()["track"] == 0
+
+
+def test_selection_preserved_after_drag_move(theme):
+    screen = build_media_workspace_screen(theme)
+    timeline = screen.findChildren(Timeline)[0]
+    timeline.select_clip(0)  # "Intro"
+    assert timeline.selected_index() == 0
+    _drag_clip_to_lane(_clip_frame_by_label(timeline, "Intro"), _lane(timeline, 1))
+    assert timeline.selected_index() == 0
+    assert timeline.selected_clip()["label"] == "Intro"
+    assert timeline.selected_clip()["track"] == 1
+
+
+def test_drag_move_emits_no_clip_selected(theme):
+    screen = build_media_workspace_screen(theme)
+    timeline = screen.findChildren(Timeline)[0]
+    timeline.select_clip(0)  # pre-select "Intro" (emits clip_selected once)
+    # Count emissions from the drag-move only.
+    selected = []
+    moved = []
+    timeline.clip_selected.connect(selected.append)
+    timeline.clip_moved.connect(lambda i, t: moved.append((i, t)))
+    _drag_clip_to_lane(_clip_frame_by_label(timeline, "Intro"), _lane(timeline, 1))
+    # The moved clip stays selected, so no clip_selected is re-emitted; the
+    # inspector is kept in sync solely via clip_moved.
+    assert selected == []
+    assert moved == [(0, 1)]
