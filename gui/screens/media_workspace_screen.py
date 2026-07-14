@@ -216,9 +216,9 @@ class _MediaWorkspace(QWidget):
         hud_row.addStretch(1)
 
         badge_qss = (
-            "{selector} {{ color: %s; background: %s; "
+            "{selector} { color: %s; background: %s; "
             "border: 1px solid %s; border-radius: %dpx; "
-            "padding: %dpx %dpx; }}"
+            "padding: %dpx %dpx; }"
             % (
                 c.text_secondary,
                 c.surface_overlay,
