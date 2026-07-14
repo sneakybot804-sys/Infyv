@@ -73,6 +73,7 @@ class _MediaWorkspace(QWidget):
         root.setSpacing(tokens.spacing.md)
 
         self._browser = MediaBrowser(theme, items=list(_DEMO_ITEMS))
+        self._browser.setMinimumWidth(240)
         self._preview_header = SectionHeader(
             theme, "Preview", subtitle="No clip selected"
         )
@@ -80,21 +81,45 @@ class _MediaWorkspace(QWidget):
         self._detail_kind = MetaLabel(theme, "Type: \u2014")
         self._detail_status = MetaLabel(theme, "Status: no selection")
 
+        handle_width = tokens.spacing.xs
+
+        # Right column: Details stacked over the Clip Inspector, like a pro
+        # editor's metadata-over-inspector column (vertical split).
+        right_column = QSplitter(Qt.Orientation.Vertical)
+        right_column.setObjectName("MediaWorkspaceRightSplitter")
+        right_column.setChildrenCollapsible(False)
+        right_column.setHandleWidth(handle_width)
+        right_column.addWidget(self._build_details())
+        right_column.addWidget(self._build_inspector())
+        right_column.setStretchFactor(0, 0)
+        right_column.setStretchFactor(1, 1)
+        right_column.setSizes([320, 520])
+
+        # Top editing area: sidebar | large preview | right column.
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
         splitter.setObjectName("MediaWorkspaceSplitter")
         splitter.setChildrenCollapsible(False)
+        splitter.setHandleWidth(handle_width)
         splitter.addWidget(self._browser)
         splitter.addWidget(self._build_preview())
-        splitter.addWidget(self._build_details())
-        splitter.addWidget(self._build_inspector())
+        splitter.addWidget(right_column)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setStretchFactor(2, 0)
-        splitter.setStretchFactor(3, 0)
-        root.addWidget(splitter, 1)
+        splitter.setSizes([260, 940, 300])
 
-        # Bottom Timeline region (additive; below the splitter).
-        root.addWidget(self._build_timeline())
+        # Outer vertical split: the editing area over a generous, resizable
+        # Timeline region (the timeline is a first-class region, not a strip).
+        main_split = QSplitter(Qt.Orientation.Vertical, self)
+        main_split.setObjectName("MediaWorkspaceMainSplitter")
+        main_split.setChildrenCollapsible(False)
+        main_split.setHandleWidth(handle_width)
+        main_split.addWidget(splitter)
+        main_split.addWidget(self._build_timeline())
+        main_split.setStretchFactor(0, 1)
+        main_split.setStretchFactor(1, 0)
+        main_split.setSizes([620, 300])
+        root.addWidget(main_split, 1)
 
         # Screen-level, UI-only wiring: media selection updates preview +
         # details; timeline clip selection updates the clip inspector.
@@ -125,6 +150,7 @@ class _MediaWorkspace(QWidget):
 
         preview = QWidget()
         preview.setObjectName("MediaWorkspacePreview")
+        preview.setMinimumWidth(420)
         layout = QVBoxLayout(preview)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(tokens.spacing.sm)
@@ -144,7 +170,7 @@ class _MediaWorkspace(QWidget):
         stage = QFrame(content)
         stage.setObjectName("MediaWorkspacePreviewStage")
         stage.setFrameShape(QFrame.Shape.StyledPanel)
-        stage.setMinimumHeight(280)
+        stage.setMinimumHeight(360)
         stage_layout = QVBoxLayout(stage)
         stage_layout.setContentsMargins(0, 0, 0, 0)
         placeholder = QLabel("Video preview", stage)
@@ -231,7 +257,7 @@ class _MediaWorkspace(QWidget):
 
         region = QWidget()
         region.setObjectName("MediaWorkspaceTimeline")
-        region.setMinimumHeight(180)
+        region.setMinimumHeight(220)
         layout = QVBoxLayout(region)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(tokens.spacing.sm)
