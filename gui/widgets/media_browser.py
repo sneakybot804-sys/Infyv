@@ -169,13 +169,45 @@ class MediaBrowser(ThemedWidget):
     # Theming
     # ------------------------------------------------------------------ #
     def apply_theme(self) -> None:
-        """Apply themed background to the scroll region.
+        """Apply the premium panel styling to the browser surfaces.
 
-        The composed child widgets (SectionHeader, NeonButtons) theme
-        themselves; this only styles the plain scroll container so it blends
-        with the surrounding surface.
+        Styling-only (Phase 9F): object-name-scoped, token-derived QSS that
+        makes the browser read as a docked, glassy asset panel (rounded panel
+        root, borderless inset scroll list, slim neon scrollbar, deep list
+        surface). The composed child widgets (SectionHeader, NeonButtons) keep
+        their own self-theming; no logic, signal, object name or API changes.
         """
         colors = self.tokens.colors
+        radius = self.tokens.radius.md
+        radius_lg = self.tokens.radius.lg
+
+        # Panel root: a layered surface so the browser looks like a first-class
+        # docked panel rather than a bare column.
+        self.setStyleSheet(
+            f"#MediaBrowser {{ background: {colors.surface}; "
+            f"border: 1px solid {colors.border}; "
+            f"border-radius: {radius_lg}px; }}"
+        )
+
+        # Scroll area + its viewport: transparent, borderless and rounded so
+        # the list blends into the panel; a slim, rounded scrollbar with an
+        # accent-cyan hover handle matches the app's premium scrollbar style.
+        self._list_area.setStyleSheet(
+            f"#MediaBrowserList {{ background: transparent; border: none; }} "
+            f"#MediaBrowserList > QWidget > QWidget {{ background: transparent; }} "
+            f"QScrollBar:vertical {{ background: transparent; "
+            f"width: {self.tokens.spacing.sm}px; margin: 0px; }} "
+            f"QScrollBar::handle:vertical {{ background: {colors.surface_overlay}; "
+            f"border-radius: {self.tokens.radius.sm}px; min-height: {self.tokens.spacing.xl}px; }} "
+            f"QScrollBar::handle:vertical:hover {{ background: {colors.accent_cyan}; }} "
+            f"QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ "
+            f"height: 0px; }} "
+            f"QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ "
+            f"background: transparent; }}"
+        )
+
+        # List container: a deep inset surface for the item rows.
         self._list_container.setStyleSheet(
-            f"#MediaBrowserListContainer {{ background: {colors.surface}; }}"
+            f"#MediaBrowserListContainer {{ background: {colors.background_deep}; "
+            f"border-radius: {radius}px; }}"
         )
