@@ -135,4 +135,136 @@ QScrollBar::add-line, QScrollBar::sub-line {{
 QScrollBar::add-page, QScrollBar::sub-page {{
     background: transparent;
 }}
+
+QScrollBar::handle:vertical:hover, QScrollBar::handle:horizontal:hover {{
+    background: {to_qss(c.accent_cyan)};
+}}
+
+/* ---- Menu bar / menus (premium glass) --------------------------------- */
+QMenuBar {{
+    background-color: {to_qss(c.surface)};
+    color: {to_qss(c.text_secondary)};
+    border-bottom: 1px solid {to_qss(c.border)};
+    padding: {s.xxs}px {s.xs}px;
+}}
+
+QMenuBar::item {{
+    background: transparent;
+    color: {to_qss(c.text_secondary)};
+    padding: {s.xs}px {s.sm}px;
+    border-radius: {r.sm}px;
+}}
+
+QMenuBar::item:selected {{
+    background-color: {to_qss(c.surface_overlay)};
+    color: {to_qss(c.text_primary)};
+}}
+
+QMenuBar::item:pressed {{
+    background-color: {to_qss(c.surface_overlay)};
+    color: {to_qss(c.accent_cyan)};
+}}
+
+QMenu {{
+    background-color: {to_qss(c.surface_elevated)};
+    color: {to_qss(c.text_primary)};
+    border: 1px solid {to_qss(c.glass_border)};
+    border-radius: {r.md}px;
+    padding: {s.xs}px;
+}}
+
+QMenu::item {{
+    background: transparent;
+    padding: {s.xs}px {s.lg}px;
+    border-radius: {r.sm}px;
+}}
+
+QMenu::item:selected {{
+    background-color: {to_qss(c.surface_overlay)};
+    color: {to_qss(c.accent_cyan)};
+}}
+
+QMenu::separator {{
+    height: 1px;
+    background: {to_qss(c.divider)};
+    margin: {s.xs}px {s.sm}px;
+}}
+
+/* ---- Toolbar ---------------------------------------------------------- */
+QToolBar {{
+    background-color: {to_qss(c.surface)};
+    border: none;
+    border-bottom: 1px solid {to_qss(c.border)};
+    spacing: {s.xs}px;
+    padding: {s.xs}px {s.sm}px;
+}}
+
+QToolBar::separator {{
+    width: 1px;
+    background: {to_qss(c.divider)};
+    margin: {s.xs}px {s.xs}px;
+}}
+
+QToolButton {{
+    background: transparent;
+    color: {to_qss(c.text_secondary)};
+    border: 1px solid transparent;
+    border-radius: {r.sm}px;
+    padding: {s.xs}px {s.sm}px;
+}}
+
+QToolButton:hover {{
+    background-color: {to_qss(c.surface_overlay)};
+    color: {to_qss(c.text_primary)};
+    border: 1px solid {to_qss(c.accent_cyan)};
+}}
+
+QToolButton:pressed, QToolButton:checked {{
+    background-color: {to_qss(c.surface_overlay)};
+    color: {to_qss(c.accent_cyan)};
+}}
+
+/* ---- Status bar ------------------------------------------------------- */
+QStatusBar {{
+    background-color: {to_qss(c.surface)};
+    color: {to_qss(c.text_muted)};
+    border-top: 1px solid {to_qss(c.border)};
+}}
+
+QStatusBar::item {{
+    border: none;
+}}
+
+/* ---- Dock widgets ----------------------------------------------------- */
+QDockWidget {{
+    color: {to_qss(c.text_secondary)};
+    titlebar-close-icon: none;
+    titlebar-normal-icon: none;
+}}
+
+QDockWidget::title {{
+    background-color: {to_qss(c.surface_elevated)};
+    color: {to_qss(c.text_secondary)};
+    padding: {s.xs}px {s.sm}px;
+    border: 1px solid {to_qss(c.border)};
+    border-top-left-radius: {r.md}px;
+    border-top-right-radius: {r.md}px;
+}}
+
+/* ---- Splitter handles ------------------------------------------------- */
+QSplitter::handle {{
+    background: {to_qss(c.divider)};
+}}
+
+QSplitter::handle:horizontal {{
+    width: {s.xxs}px;
+}}
+
+QSplitter::handle:vertical {{
+    height: {s.xxs}px;
+}}
+
+QSplitter::handle:hover {{
+    background: {to_qss(c.accent_cyan)};
+}}
 """.strip()
