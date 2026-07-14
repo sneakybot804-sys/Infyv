@@ -175,7 +175,7 @@ class _MediaWorkspace(QWidget):
         stage.setFrameShape(QFrame.Shape.StyledPanel)
         stage.setMinimumHeight(360)
         c = tokens.colors
-        stage_radius = self._theme.scaled(tokens.radius.lg)
+        stage_radius = tokens.radius.lg
         stage.setStyleSheet(
             f"#MediaWorkspacePreviewStage {{ "
             f"background: qlineargradient(x1:0, y1:0, x2:0, y2:1, "
@@ -197,7 +197,7 @@ class _MediaWorkspace(QWidget):
             f"#MediaWorkspacePreviewHud {{ "
             f"background: {c.glass_fill}; "
             f"border: 1px solid {c.glass_border}; "
-            f"border-radius: {self._theme.scaled(tokens.radius.md)}px; }}"
+            f"border-radius: {tokens.radius.md}px; }}"
         )
         hud_row = QHBoxLayout(hud)
         hud_row.setContentsMargins(
@@ -223,9 +223,9 @@ class _MediaWorkspace(QWidget):
                 c.text_secondary,
                 c.surface_overlay,
                 c.glass_border,
-                self._theme.scaled(tokens.radius.sm),
-                self._theme.scaled(tokens.spacing.xxs),
-                self._theme.scaled(tokens.spacing.sm),
+                tokens.radius.sm,
+                tokens.spacing.xxs,
+                tokens.spacing.sm,
             )
         )
         for text, name in (
