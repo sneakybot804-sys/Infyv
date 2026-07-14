@@ -167,17 +167,105 @@ class _MediaWorkspace(QWidget):
         self._preview_header.set_divider(True)
         inner.addWidget(self._preview_header)
 
+        # Cinematic preview stage: a deep gradient backdrop with a soft glass
+        # border, a glass HUD overlay (timecode + badges), a subtle safe-area
+        # guide, and a centered premium empty state.
         stage = QFrame(content)
         stage.setObjectName("MediaWorkspacePreviewStage")
         stage.setFrameShape(QFrame.Shape.StyledPanel)
         stage.setMinimumHeight(360)
+        c = tokens.colors
+        stage_radius = self._theme.scaled(tokens.radius.lg)
+        stage.setStyleSheet(
+            f"#MediaWorkspacePreviewStage {{ "
+            f"background: qlineargradient(x1:0, y1:0, x2:0, y2:1, "
+            f"stop:0 {c.background_base}, stop:1 {c.background_deep}); "
+            f"border: 1px solid {c.glass_border}; "
+            f"border-radius: {stage_radius}px; }}"
+        )
         stage_layout = QVBoxLayout(stage)
-        stage_layout.setContentsMargins(0, 0, 0, 0)
-        placeholder = QLabel("Video preview", stage)
+        stage_layout.setContentsMargins(
+            tokens.spacing.md, tokens.spacing.md, tokens.spacing.md, tokens.spacing.md
+        )
+        stage_layout.setSpacing(tokens.spacing.sm)
+
+        # Top glass HUD: timecode (left) + resolution / FPS / zoom badges
+        # (right). Decorative chrome; additive object names only.
+        hud = QWidget(stage)
+        hud.setObjectName("MediaWorkspacePreviewHud")
+        hud.setStyleSheet(
+            f"#MediaWorkspacePreviewHud {{ "
+            f"background: {c.glass_fill}; "
+            f"border: 1px solid {c.glass_border}; "
+            f"border-radius: {self._theme.scaled(tokens.radius.md)}px; }}"
+        )
+        hud_row = QHBoxLayout(hud)
+        hud_row.setContentsMargins(
+            tokens.spacing.md, tokens.spacing.xs, tokens.spacing.md, tokens.spacing.xs
+        )
+        hud_row.setSpacing(tokens.spacing.sm)
+
+        timecode = QLabel("00:00:00:00", hud)
+        timecode.setObjectName("MediaWorkspacePreviewTimecode")
+        timecode.setFont(self._theme.font("mono"))
+        timecode.setStyleSheet(
+            f"#MediaWorkspacePreviewTimecode {{ color: {c.accent_cyan}; "
+            f"background: transparent; }}"
+        )
+        hud_row.addWidget(timecode)
+        hud_row.addStretch(1)
+
+        badge_qss = (
+            "{selector} {{ color: %s; background: %s; "
+            "border: 1px solid %s; border-radius: %dpx; "
+            "padding: %dpx %dpx; }}"
+            % (
+                c.text_secondary,
+                c.surface_overlay,
+                c.glass_border,
+                self._theme.scaled(tokens.radius.sm),
+                self._theme.scaled(tokens.spacing.xxs),
+                self._theme.scaled(tokens.spacing.sm),
+            )
+        )
+        for text, name in (
+            ("1920\u00d71080", "MediaWorkspacePreviewResBadge"),
+            ("30 fps", "MediaWorkspacePreviewFpsBadge"),
+            ("100%", "MediaWorkspacePreviewZoomBadge"),
+        ):
+            badge = QLabel(text, hud)
+            badge.setObjectName(name)
+            badge.setFont(self._theme.font("caption"))
+            badge.setStyleSheet(
+                badge_qss.replace("{selector}", f"#{name}")
+            )
+            hud_row.addWidget(badge)
+
+        stage_layout.addWidget(hud)
+
+        # Centered premium empty state (keeps the existing object name / type).
+        stage_layout.addStretch(1)
+        placeholder = QLabel("No clip selected", stage)
         placeholder.setObjectName("MediaWorkspacePreviewPlaceholder")
         placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        placeholder.setFont(self._theme.font("caption"))
+        placeholder.setFont(self._theme.font("h3"))
+        placeholder.setStyleSheet(
+            f"#MediaWorkspacePreviewPlaceholder {{ color: {c.text_muted}; "
+            f"background: transparent; }}"
+        )
         stage_layout.addWidget(placeholder)
+
+        hint = QLabel("Select a clip to preview", stage)
+        hint.setObjectName("MediaWorkspacePreviewHint")
+        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hint.setFont(self._theme.font("caption"))
+        hint.setStyleSheet(
+            f"#MediaWorkspacePreviewHint {{ color: {c.text_disabled}; "
+            f"background: transparent; }}"
+        )
+        stage_layout.addWidget(hint)
+        stage_layout.addStretch(2)
+
         inner.addWidget(stage, 1)
 
         self._transport = TransportBar(self._theme)
