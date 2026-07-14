@@ -59,7 +59,9 @@ class ClipInspector(ThemedWidget):
 
         tokens = self.tokens
         self._column = QVBoxLayout(self)
-        self._column.setContentsMargins(0, 0, 0, 0)
+        self._column.setContentsMargins(
+            tokens.spacing.xs, tokens.spacing.xs, tokens.spacing.xs, tokens.spacing.xs
+        )
         self._column.setSpacing(tokens.spacing.sm)
 
         self._header = SectionHeader(
@@ -135,4 +137,37 @@ class ClipInspector(ThemedWidget):
     # Theming
     # ------------------------------------------------------------------ #
     def apply_theme(self) -> None:
-        """No extra styling: composed children theme themselves."""
+        """Apply premium property-panel styling to the inspector surfaces.
+
+        Styling-only (Phase 10A): object-name-scoped, token-derived QSS that
+        renders each property row as a glassy "property card" and gives the
+        empty state a calm, muted look. The composed SectionHeader / MetaLabel
+        children keep their own self-theming; no logic, field text, visibility
+        behavior, object name, signal or API is changed.
+        """
+        colors = self.tokens.colors
+        radius = self.tokens.radius.md
+        pad_v = self.tokens.spacing.xs
+        pad_h = self.tokens.spacing.md
+
+        # Empty state: muted, softly padded.
+        self._empty.setStyleSheet(
+            f"#ClipInspectorEmpty {{ color: {colors.text_muted}; "
+            f"background: transparent; padding: {pad_v}px {pad_h}px; }}"
+        )
+
+        # Property rows rendered as glassy property cards: surface background,
+        # rounded corners, a subtle border, comfortable padding and an
+        # accent-tinted hover.
+        field_qss = (
+            f"#ClipInspectorField {{ color: {colors.text_secondary}; "
+            f"background: {colors.surface_overlay}; "
+            f"border: 1px solid {colors.border}; "
+            f"border-radius: {radius}px; "
+            f"padding: {pad_v}px {pad_h}px; }} "
+            f"#ClipInspectorField:hover {{ "
+            f"border: 1px solid {colors.accent_cyan}; "
+            f"color: {colors.text_primary}; }}"
+        )
+        for field in self._fields:
+            field.setStyleSheet(field_qss)
