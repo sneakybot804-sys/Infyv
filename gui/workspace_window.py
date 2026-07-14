@@ -27,7 +27,8 @@ from __future__ import annotations
 
 import sys
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QDockWidget,
     QMainWindow,
@@ -71,9 +72,38 @@ def build_workspace_window(theme: ThemeManager) -> QMainWindow:
     for title in ("File", "Edit", "View", "AI", "Help"):
         menu_bar.addMenu(title)
 
-    # Main toolbar.
+    # Main toolbar: fixed desktop chrome (not a floating/movable palette),
+    # flat document mode, a consistent icon size and text-beside-icon buttons
+    # for a professional, labelled toolbar. Populated with grouped, inert
+    # placeholder actions separated by toolbar separators; the actions are not
+    # wired to any slot, so behavior is unchanged. Premium hover/pressed/focus
+    # styling is supplied globally by the theme QSS.
     toolbar = QToolBar("Main", window)
     toolbar.setObjectName("WorkspaceMainToolbar")
+    toolbar.setMovable(False)
+    toolbar.setFloatable(False)
+    toolbar.setDocumentMode(True)
+    toolbar.setIconSize(QSize(18, 18))
+    toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+
+    # Grouped, inert placeholder actions (import / edit / history / output /
+    # settings). Separators create professional visual grouping. None of these
+    # are connected, so the workspace stays functionally identical.
+    _toolbar_groups = (
+        (("Import", "ToolbarActionImport"),),
+        (("Cut", "ToolbarActionCut"), ("Split", "ToolbarActionSplit")),
+        (("Undo", "ToolbarActionUndo"), ("Redo", "ToolbarActionRedo")),
+        (("Export", "ToolbarActionExport"),),
+        (("Settings", "ToolbarActionSettings"),),
+    )
+    for group_index, group in enumerate(_toolbar_groups):
+        if group_index:
+            toolbar.addSeparator()
+        for text, name in group:
+            action = QAction(text, window)
+            action.setObjectName(name)
+            toolbar.addAction(action)
+
     window.addToolBar(Qt.ToolBarArea.TopToolBarArea, toolbar)
 
     # Docks: left / right / bottom.
