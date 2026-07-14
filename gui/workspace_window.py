@@ -82,7 +82,6 @@ def build_workspace_window(theme: ThemeManager) -> QMainWindow:
     toolbar.setObjectName("WorkspaceMainToolbar")
     toolbar.setMovable(False)
     toolbar.setFloatable(False)
-    toolbar.setDocumentMode(True)
     toolbar.setIconSize(QSize(18, 18))
     toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
 
