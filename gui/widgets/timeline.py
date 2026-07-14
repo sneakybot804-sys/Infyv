@@ -859,28 +859,77 @@ class Timeline(ThemedWidget):
     # Theming
     # ------------------------------------------------------------------ #
     def apply_theme(self) -> None:
-        """Apply themed backgrounds and borders to the timeline surfaces."""
+        """Apply the premium themed styling to the timeline surfaces.
+
+        Styling-only (Phase 9D): richer, object-name-scoped, token-derived QSS
+        for a modern pro-editor look (glass ruler, alternating lane shading,
+        gradient clip cards with hover + selection glow, accent playhead). No
+        behavior, object name, dynamic property, signal or code path changes.
+        """
         colors = self.tokens.colors
         radius = self.scaled(self.tokens.radius.sm)
+        radius_md = self.scaled(self.tokens.radius.md)
+
+        # Root: a calm deep backdrop under the ruler / tracks.
+        self.setStyleSheet(
+            f"#Timeline {{ background: {colors.background_base}; }}"
+        )
+
+        # Ruler: elevated glass strip, subtle bottom divider, rounded top; the
+        # tick labels are muted so the time scale reads as secondary.
         self._ruler.setStyleSheet(
             f"#TimelineRuler {{ background: {colors.surface_elevated}; "
-            f"border-radius: {radius}px; }}"
+            f"border: 1px solid {colors.glass_border}; "
+            f"border-bottom: 1px solid {colors.border}; "
+            f"border-radius: {radius_md}px; }} "
+            f"#TimelineTick {{ color: {colors.text_muted}; "
+            f"background: transparent; }}"
         )
+
+        # Tracks container: the deepest surface, so lanes read as insets.
         self._tracks_container.setStyleSheet(
-            f"#TimelineTracks {{ background: {colors.surface}; }}"
+            f"#TimelineTracks {{ background: {colors.background_deep}; "
+            f"border-radius: {radius_md}px; }}"
         )
+
+        # Playhead: a thin accent-cyan line/handle with rounded ends.
         self._playhead_marker.setStyleSheet(
             f"#TimelinePlayhead {{ background: {colors.accent_cyan}; "
             f"border-radius: {radius}px; }}"
         )
-        for lane in self._track_widgets:
+
+        # Track lanes: alternating row shading (pro editors alternate lanes),
+        # a subtle border and rounded corners; the drag preview keeps its
+        # dropTarget highlight, styled here as a cyan-accent inset.
+        for index, lane in enumerate(self._track_widgets):
+            lane_bg = colors.surface if index % 2 == 0 else colors.surface_overlay
             lane.setStyleSheet(
-                f"#TimelineTrack {{ background: {colors.surface_overlay}; "
-                f"border-radius: {radius}px; }}"
+                f"#TimelineTrack {{ background: {lane_bg}; "
+                f"border: 1px solid {colors.border}; "
+                f"border-radius: {radius}px; }} "
+                f'#TimelineTrack[dropTarget="true"] {{ '
+                f"background: {colors.surface_overlay}; "
+                f"border: 1px solid {colors.accent_cyan}; }}"
             )
+
+        # Clip cards: premium purple->blue gradient, translucent border,
+        # rounded, with a hover brighten and a selection glow (accent border +
+        # brighter fill) keyed on the existing `selected` dynamic property.
+        clip_qss = (
+            f"#TimelineClip {{ "
+            f"background: qlineargradient(x1:0, y1:0, x2:0, y2:1, "
+            f"stop:0 {colors.accent_purple}, stop:1 {colors.accent_blue}); "
+            f"border: 1px solid {colors.glass_border}; "
+            f"border-radius: {radius}px; }} "
+            f"#TimelineClip:hover {{ "
+            f"border: 1px solid {colors.glass_highlight}; }} "
+            f'#TimelineClip[selected="true"] {{ '
+            f"background: qlineargradient(x1:0, y1:0, x2:0, y2:1, "
+            f"stop:0 {colors.accent_cyan}, stop:1 {colors.accent_blue}); "
+            f"border: 1px solid {colors.accent_cyan}; }} "
+            f"#TimelineClipLabel {{ color: {colors.text_on_accent}; "
+            f"background: transparent; }}"
+        )
         for block in self.findChildren(QFrame):
             if block.objectName() == "TimelineClip":
-                block.setStyleSheet(
-                    f"#TimelineClip {{ background: {colors.accent_purple}; "
-                    f"border-radius: {radius}px; }}"
-                )
+                block.setStyleSheet(clip_qss)
