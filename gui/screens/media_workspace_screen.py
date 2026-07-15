@@ -128,19 +128,39 @@ class _MediaWorkspace(QWidget):
         right_tabs.setObjectName("MediaWorkspaceRightTabs")
         right_tabs.addTab(self._build_inspector(), "Inspector")
         right_tabs.addTab(self._build_ai_assistant(), "AI")
+        _tc = tokens.colors
+        _tr = tokens.radius
+        _ts = tokens.spacing
         right_tabs.setStyleSheet(
-            f"#MediaWorkspaceRightTabs::pane {{ border: none; }} "
+            # Pane: standard border on three sides; top edge is suppressed so
+            # the active tab's bottom accent line sits flush against the pane.
+            f"#MediaWorkspaceRightTabs::pane {{ "
+            f"border: 1px solid {_tc.border}; "
+            f"border-top: none; "
+            f"border-bottom-left-radius: {_tr.sm}px; "
+            f"border-bottom-right-radius: {_tr.sm}px; }} "
+            # Inactive tab: flat surface, muted text, standard border,
+            # no bottom border so it merges with the pane below.
             f"#MediaWorkspaceRightTabs QTabBar::tab {{ "
-            f"background: {tokens.colors.surface}; "
-            f"color: {tokens.colors.text_muted}; "
-            f"border: 1px solid {tokens.colors.border}; "
-            f"border-top-left-radius: {tokens.radius.sm}px; "
-            f"border-top-right-radius: {tokens.radius.sm}px; "
-            f"padding: {tokens.spacing.xs}px {tokens.spacing.md}px; "
-            f"margin-right: {tokens.spacing.xxs}px; }} "
+            f"background: {_tc.surface}; "
+            f"color: {_tc.text_muted}; "
+            f"border: 1px solid {_tc.border}; "
+            f"border-bottom: none; "
+            f"border-top-left-radius: {_tr.sm}px; "
+            f"border-top-right-radius: {_tr.sm}px; "
+            f"padding: {_ts.sm}px {_ts.lg}px; "
+            f"margin-right: {_ts.xxs}px; }} "
+            # Hover: subtle surface lift + secondary text.
+            f"#MediaWorkspaceRightTabs QTabBar::tab:hover {{ "
+            f"background: {_tc.surface_overlay}; "
+            f"color: {_tc.text_secondary}; }} "
+            # Active: elevated surface, cyan text, 2px cyan bottom glow line
+            # matching the nav sidebar active-item accent pattern.
             f"#MediaWorkspaceRightTabs QTabBar::tab:selected {{ "
-            f"color: {tokens.colors.accent_cyan}; "
-            f"border: 1px solid {tokens.colors.accent_cyan}; }}"
+            f"background: {_tc.surface_elevated}; "
+            f"color: {_tc.accent_cyan}; "
+            f"border: 1px solid {_tc.border}; "
+            f"border-bottom: 2px solid {_tc.accent_cyan}; }}"
         )
 
         right_column.addWidget(self._build_details())
@@ -244,9 +264,12 @@ class _MediaWorkspace(QWidget):
         # --- Phase 10F: viewer toolbar (decorative, wired to nothing) --- #
         viewer_toolbar = QWidget(content)
         viewer_toolbar.setObjectName("MediaWorkspaceViewerToolbar")
+        # Minimum height floor prevents button text clipping when the preview
+        # pane is narrow or the window is at a non-standard scale factor.
+        viewer_toolbar.setMinimumHeight(36)
         vt_row = QHBoxLayout(viewer_toolbar)
         vt_row.setContentsMargins(
-            tokens.spacing.sm, tokens.spacing.xs, tokens.spacing.sm, tokens.spacing.xs
+            tokens.spacing.sm, tokens.spacing.sm, tokens.spacing.sm, tokens.spacing.sm
         )
         vt_row.setSpacing(tokens.spacing.sm)
         zoom_dropdown = Dropdown(
@@ -510,7 +533,9 @@ class _MediaWorkspace(QWidget):
         body_container = QWidget()
         body_container.setObjectName("MediaWorkspaceDetailsBodyContainer")
         body_layout = QVBoxLayout(body_container)
-        body_layout.setContentsMargins(0, 0, 0, 0)
+        # Right margin gives section headers and group cards 8px of breathing
+        # room away from the scrollbar track so content never sits flush.
+        body_layout.setContentsMargins(0, 0, tokens.spacing.sm, 0)
         body_layout.setSpacing(tokens.spacing.md)
 
         def _section(title: str, rows) -> None:
