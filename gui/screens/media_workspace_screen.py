@@ -116,6 +116,11 @@ class _MediaWorkspace(QWidget):
         right_column.setObjectName("MediaWorkspaceRightSplitter")
         right_column.setChildrenCollapsible(False)
         right_column.setHandleWidth(handle_width)
+        # Hard width cap: prevents the right column from absorbing surplus
+        # horizontal space when the window is maximised on a wide monitor.
+        # setSizes() is a one-time hint; only setFixedWidth is a true
+        # constraint that survives a window resize / maximise event.
+        right_column.setFixedWidth(300)
         # The lower pane tabs the Clip Inspector together with the AI
         # Assistant so the AI panel reuses the existing right-column space
         # without shrinking the Details or Inspector panels.
@@ -156,6 +161,10 @@ class _MediaWorkspace(QWidget):
         self._sidebar = NavigationSidebar(self._theme)
         # Fixed horizontal / Expanding vertical: the sidebar never shrinks
         # below its setFixedWidth(240) and always fills the vertical space.
+        # setFixedWidth here mirrors the value set inside NavigationSidebar
+        # itself; the redundant call on the outer widget ensures the splitter
+        # geometry engine sees the constraint at the pane level too.
+        self._sidebar.setFixedWidth(240)
         self._sidebar.setSizePolicy(
             QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding
         )
@@ -165,10 +174,13 @@ class _MediaWorkspace(QWidget):
         splitter.setCollapsible(0, False)  # sidebar must never collapse
         splitter.setCollapsible(1, False)  # preview must never collapse
         splitter.setCollapsible(2, False)  # right column must never collapse
-        splitter.setStretchFactor(0, 0)    # sidebar: fixed width
-        splitter.setStretchFactor(1, 1)    # preview: takes all spare space
-        splitter.setStretchFactor(2, 0)    # right column: fixed-ish
-        splitter.setSizes([240, 940, 300])
+        splitter.setStretchFactor(0, 0)    # sidebar: fixed at 240px
+        splitter.setStretchFactor(1, 1)    # preview: absorbs ALL spare space
+        splitter.setStretchFactor(2, 0)    # right column: fixed at 300px
+        # setSizes is a one-time layout hint. The true constraints are the
+        # setFixedWidth calls on sidebar (240px) and right_column (300px);
+        # those survive maximise / resize events where setSizes does not.
+        splitter.setSizes([240, 1380, 300])
 
         # Outer vertical split: the editing area over a generous, resizable
         # Timeline region (the timeline is a first-class region, not a strip).
@@ -465,6 +477,7 @@ class _MediaWorkspace(QWidget):
         details = QWidget()
         details.setObjectName("MediaWorkspaceDetails")
         details.setMinimumWidth(260)
+        details.setMaximumWidth(300)
         layout = QVBoxLayout(details)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(tokens.spacing.md)
@@ -633,6 +646,7 @@ class _MediaWorkspace(QWidget):
         region = QWidget()
         region.setObjectName("MediaWorkspaceInspector")
         region.setMinimumWidth(260)
+        region.setMaximumWidth(300)
         layout = QVBoxLayout(region)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(tokens.spacing.md)

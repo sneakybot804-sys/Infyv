@@ -33,8 +33,11 @@ def main() -> int:
     theme.apply(app)
 
     window = build_media_workspace_screen(theme)
-    window.resize(1600, 900)
-    window.show()
+    # showMaximized() computes the layout once at the full screen size with
+    # all fixed-width constraints already in place. Using resize() + show()
+    # causes Qt to lay out at 1600x900 first, then re-layout on maximise,
+    # which can override setSizes() hints and scatter the panels.
+    window.showMaximized()
     return app.exec()
 
 
