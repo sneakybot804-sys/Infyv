@@ -262,16 +262,21 @@ class _MediaWorkspace(QWidget):
         inner.addWidget(self._preview_header)
 
         # --- Phase 10F: viewer toolbar (decorative, wired to nothing) --- #
+        # Layout: [Zoom dropdown] ----stretch---- [Safe | toggle] [Grid | toggle]
+        #         [Screenshot] [Fullscreen]
+        # The Fit and 100% NeonButtons that previously sat next to the dropdown
+        # duplicated its own "Fit" and "100%" options and caused the double-Fit
+        # visual artifact. Removed; the dropdown is the sole zoom control.
         viewer_toolbar = QWidget(content)
         viewer_toolbar.setObjectName("MediaWorkspaceViewerToolbar")
-        # Minimum height floor prevents button text clipping when the preview
-        # pane is narrow or the window is at a non-standard scale factor.
         viewer_toolbar.setMinimumHeight(36)
         vt_row = QHBoxLayout(viewer_toolbar)
         vt_row.setContentsMargins(
             tokens.spacing.sm, tokens.spacing.sm, tokens.spacing.sm, tokens.spacing.sm
         )
         vt_row.setSpacing(tokens.spacing.sm)
+
+        # Left group: zoom preset selector.
         zoom_dropdown = Dropdown(
             self._theme,
             items=["Fit", "25%", "50%", "100%", "200%"],
@@ -280,31 +285,37 @@ class _MediaWorkspace(QWidget):
         )
         zoom_dropdown.setObjectName("MediaWorkspaceViewerZoom")
         vt_row.addWidget(zoom_dropdown, 0)
-        fit_btn = NeonButton(self._theme, "Fit", variant="ghost", accent="cyan")
-        fit_btn.setObjectName("MediaWorkspaceViewerFit")
-        vt_row.addWidget(fit_btn, 0)
-        full_btn = NeonButton(self._theme, "100%", variant="ghost", accent="cyan")
-        full_btn.setObjectName("MediaWorkspaceViewerHundred")
-        vt_row.addWidget(full_btn, 0)
+
+        # Single stretch pushes the right group to the far right.
         vt_row.addStretch(1)
+
+        # Right group: overlay toggles then action buttons.
+        vt_row.addWidget(
+            MetaLabel(self._theme, "Safe", role="muted", style="caption"), 0
+        )
         safe_toggle = ToggleSwitch(self._theme, checked=False, accent="cyan")
         safe_toggle.setObjectName("MediaWorkspaceViewerSafeToggle")
-        vt_row.addWidget(MetaLabel(self._theme, "Safe", role="muted", style="caption"), 0)
         vt_row.addWidget(safe_toggle, 0)
+
+        vt_row.addWidget(
+            MetaLabel(self._theme, "Grid", role="muted", style="caption"), 0
+        )
         grid_toggle = ToggleSwitch(self._theme, checked=False, accent="purple")
         grid_toggle.setObjectName("MediaWorkspaceViewerGridToggle")
-        vt_row.addWidget(MetaLabel(self._theme, "Grid", role="muted", style="caption"), 0)
         vt_row.addWidget(grid_toggle, 0)
+
         shot_btn = NeonButton(
             self._theme, "Screenshot", variant="ghost", accent="cyan"
         )
         shot_btn.setObjectName("MediaWorkspaceViewerScreenshot")
         vt_row.addWidget(shot_btn, 0)
+
         fs_btn = NeonButton(
             self._theme, "Fullscreen", variant="ghost", accent="cyan"
         )
         fs_btn.setObjectName("MediaWorkspaceViewerFullscreen")
         vt_row.addWidget(fs_btn, 0)
+
         viewer_toolbar.setStyleSheet(
             f"#MediaWorkspaceViewerToolbar {{ "
             f"background: {tokens.colors.surface}; "
