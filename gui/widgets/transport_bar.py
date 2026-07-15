@@ -72,7 +72,11 @@ class TransportBar(ThemedWidget):
         tokens = self.tokens
 
         row = QHBoxLayout(self)
-        row.setContentsMargins(0, 0, 0, 0)
+        # Inset padding so the controls sit inside a padded transport bar
+        # rather than flush against the edges (layout values only).
+        row.setContentsMargins(
+            tokens.spacing.md, tokens.spacing.sm, tokens.spacing.md, tokens.spacing.sm
+        )
         row.setSpacing(tokens.spacing.sm)
 
         self._play = NeonButton(self._theme, "Play", variant="primary", accent="cyan")
@@ -171,8 +175,26 @@ class TransportBar(ThemedWidget):
     # Theming
     # ------------------------------------------------------------------ #
     def apply_theme(self) -> None:
-        """No extra styling: composed children theme themselves.
+        """Apply the premium transport-bar chrome to the row surface.
 
-        The buttons and slider obtain all visual values from the injected
-        theme; the row itself is a plain transparent container.
+        Styling-only (Phase 10B): object-name-scoped, token-derived QSS that
+        makes the transport read as a docked, glassy control strip (an
+        elevated surface with a subtle vertical gradient, a soft glass border
+        and rounded corners). The composed child widgets (the Play / Pause /
+        Stop NeonButtons and the seek Slider) keep their own self-theming; no
+        logic, signal, object name or API changes.
         """
+        colors = self.tokens.colors
+        radius_lg = self.tokens.radius.lg
+
+        # Transport root: a layered elevated surface with a subtle vertical
+        # gradient, a soft glass border and rounded corners, so the transport
+        # reads as a first-class docked control strip.
+        self.setStyleSheet(
+            f"#TransportBar {{ background: qlineargradient("
+            f"x1: 0, y1: 0, x2: 0, y2: 1, "
+            f"stop: 0 {colors.surface_elevated}, "
+            f"stop: 1 {colors.surface}); "
+            f"border: 1px solid {colors.border}; "
+            f"border-radius: {radius_lg}px; }}"
+        )
