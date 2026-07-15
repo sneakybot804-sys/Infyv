@@ -56,9 +56,22 @@ def build_workspace_window(theme: ThemeManager) -> QMainWindow:
     """
     from gui.screens.media_workspace_screen import build_media_workspace_screen
 
+    tokens = theme.tokens
+    colors = tokens.colors
+
     window = QMainWindow()
     window.setObjectName("WorkspaceMainWindow")
     window.setWindowTitle("AI Gaming Video Editor \u2014 Workspace")
+    # Premium desktop proportions (visual only; no behavior change).
+    window.resize(1600, 960)
+    window.setMinimumSize(1120, 700)
+    # Animated, nestable docks with a consistent tabbed look, so the docks
+    # read as first-class panels rather than floating palettes.
+    window.setDockOptions(
+        QMainWindow.DockOption.AnimatedDocks
+        | QMainWindow.DockOption.AllowNestedDocks
+        | QMainWindow.DockOption.AllowTabbedDocks
+    )
 
     # Central content: the frozen media workspace screen. The host names the
     # central-widget instance WorkspaceScreen (the embedded screen keeps its
@@ -105,24 +118,65 @@ def build_workspace_window(theme: ThemeManager) -> QMainWindow:
 
     window.addToolBar(Qt.ToolBarArea.TopToolBarArea, toolbar)
 
-    # Docks: left / right / bottom.
+    # Docks: left / right / bottom. Uniform, professional dock features so
+    # each reads as a first-class desktop panel; object names and titles are
+    # unchanged.
+    dock_features = (
+        QDockWidget.DockWidgetFeature.DockWidgetMovable
+        | QDockWidget.DockWidgetFeature.DockWidgetFloatable
+        | QDockWidget.DockWidgetFeature.DockWidgetClosable
+    )
     left_dock = QDockWidget("Library", window)
     left_dock.setObjectName("WorkspaceLeftDock")
+    left_dock.setFeatures(dock_features)
+    left_dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
     left_dock.setWidget(QWidget(left_dock))
     window.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, left_dock)
 
     right_dock = QDockWidget("Inspector", window)
     right_dock.setObjectName("WorkspaceRightDock")
+    right_dock.setFeatures(dock_features)
+    right_dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
     right_dock.setWidget(QWidget(right_dock))
     window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, right_dock)
 
     bottom_dock = QDockWidget("Timeline", window)
     bottom_dock.setObjectName("WorkspaceBottomDock")
+    bottom_dock.setFeatures(dock_features)
+    bottom_dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
     bottom_dock.setWidget(QWidget(bottom_dock))
     window.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, bottom_dock)
 
-    # Status bar.
+    # Status bar: a professional desktop edge (size grip) and the frozen
+    # "Ready" message.
+    window.statusBar().setSizeGripEnabled(True)
     window.statusBar().showMessage("Ready")
+
+    # Premium shell chrome: a window-level, object-name-scoped, token-derived
+    # QSS block layered on top of the global theme QSS. Framed main-window
+    # surface, glass dock title bars, a denser toolbar rhythm and a glassy
+    # status bar with a subtle top divider. No hardcoded colors.
+    window.setStyleSheet(
+        f"#WorkspaceMainWindow {{ background: {colors.background_base}; }} "
+        f"#WorkspaceMainWindow::separator {{ background: {colors.border}; "
+        f"width: {tokens.spacing.xxs}px; height: {tokens.spacing.xxs}px; }} "
+        f"QDockWidget {{ color: {colors.text_secondary}; "
+        f"titlebar-close-icon: none; titlebar-normal-icon: none; }} "
+        f"QDockWidget::title {{ background: {colors.surface_elevated}; "
+        f"color: {colors.accent_cyan}; "
+        f"border: 1px solid {colors.glass_border}; "
+        f"border-top-left-radius: {tokens.radius.md}px; "
+        f"border-top-right-radius: {tokens.radius.md}px; "
+        f"padding: {tokens.spacing.xs}px {tokens.spacing.md}px; }} "
+        f"#WorkspaceMainToolbar {{ background: {colors.surface}; "
+        f"border: none; border-bottom: 1px solid {colors.border}; "
+        f"spacing: {tokens.spacing.xs}px; "
+        f"padding: {tokens.spacing.xxs}px {tokens.spacing.sm}px; }} "
+        f"QStatusBar {{ background: {colors.surface}; "
+        f"color: {colors.text_muted}; "
+        f"border-top: 1px solid {colors.border}; }} "
+        f"QStatusBar::item {{ border: none; }}"
+    )
 
     return window
 
