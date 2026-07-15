@@ -81,6 +81,17 @@ class _MediaWorkspace(QWidget):
         )
         root.setSpacing(tokens.spacing.md)
 
+        # Surface hierarchy (visual-only): the application background sits
+        # under the workspace surface behind the panels, so the app reads as
+        # layered depth (App background -> workspace -> panel card -> content)
+        # rather than a flat field of identical panels. Token-derived; no
+        # hardcoded colors, no behavior change.
+        self.setStyleSheet(
+            f"#MediaWorkspaceScreen {{ background: {tokens.colors.background_base}; }} "
+            f"#MediaWorkspaceScreen QSplitter::handle {{ "
+            f"background: transparent; }}"
+        )
+
         self._browser = MediaBrowser(theme, items=list(_DEMO_ITEMS))
         self._browser.setMinimumWidth(240)
         self._preview_header = SectionHeader(
@@ -438,7 +449,9 @@ class _MediaWorkspace(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(tokens.spacing.md)
 
-        card = GlassCard(self._theme, glow=None, elevation="medium")
+        # Secondary panel: a flatter elevation so the primary panels
+        # (Preview / Inspector / AI / Timeline) read as the dominant surfaces.
+        card = GlassCard(self._theme, glow=None, elevation="low")
         card.setObjectName("MediaWorkspaceDetailsCard")
         content = QWidget()
         inner = QVBoxLayout(content)
