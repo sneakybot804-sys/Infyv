@@ -117,9 +117,12 @@ class TransportBar(ThemedWidget):
         self._ai_badge.setObjectName("TransportAiBadge")
         self._fps_badge = StatusBadge(self._theme, "60 FPS", status="neutral")
         self._fps_badge.setObjectName("TransportFpsBadge")
+        self._status_badge = StatusBadge(self._theme, "Ready", status="info")
+        self._status_badge.setObjectName("TransportStatusBadge")
+        badges_row.addWidget(self._fps_badge)
         badges_row.addWidget(self._gpu_badge)
         badges_row.addWidget(self._ai_badge)
-        badges_row.addWidget(self._fps_badge)
+        badges_row.addWidget(self._status_badge)
         control_zone.addWidget(self._badges, 0)
 
         control_zone.addStretch(1)
@@ -144,6 +147,13 @@ class TransportBar(ThemedWidget):
         self._separator_left.setFrameShape(QFrame.Shape.VLine)
         controls_row.addWidget(self._separator_left)
 
+        # Previous-frame step (decorative placeholder, wired to nothing).
+        self._prev_frame = NeonButton(
+            self._theme, "\u23ee", variant="ghost", accent="cyan"
+        )
+        self._prev_frame.setObjectName("TransportPrevFrame")
+        controls_row.addWidget(self._prev_frame)
+
         self._play = NeonButton(self._theme, "Play", variant="primary", accent="cyan")
         self._play.setObjectName("TransportPlay")
         self._play.clicked.connect(self._on_play)
@@ -158,6 +168,20 @@ class TransportBar(ThemedWidget):
         self._stop.setObjectName("TransportStop")
         self._stop.clicked.connect(self._on_stop)
         controls_row.addWidget(self._stop)
+
+        # Next-frame step (decorative placeholder, wired to nothing).
+        self._next_frame = NeonButton(
+            self._theme, "\u23ed", variant="ghost", accent="cyan"
+        )
+        self._next_frame.setObjectName("TransportNextFrame")
+        controls_row.addWidget(self._next_frame)
+
+        # Loop toggle (decorative placeholder, wired to nothing).
+        self._loop_button = NeonButton(
+            self._theme, "Loop", variant="ghost", accent="purple"
+        )
+        self._loop_button.setObjectName("TransportLoopButton")
+        controls_row.addWidget(self._loop_button)
 
         self._separator_right = QFrame(self._controls)
         self._separator_right.setObjectName("TransportSeparatorRight")
@@ -178,10 +202,20 @@ class TransportBar(ThemedWidget):
         self._rate.setObjectName("TransportRate")
         self._zoom = MetaLabel(self._theme, "100%", role="muted", style="mono")
         self._zoom.setObjectName("TransportZoom")
+        self._render_quality = MetaLabel(
+            self._theme, "Full", role="muted", style="body_small"
+        )
+        self._render_quality.setObjectName("TransportRenderQuality")
+        self._preview_res = MetaLabel(
+            self._theme, "1920x1080", role="muted", style="mono"
+        )
+        self._preview_res.setObjectName("TransportPreviewRes")
         self._loop = MetaLabel(self._theme, "Loop", role="muted", style="body_small")
         self._loop.setObjectName("TransportLoop")
         indicators_row.addWidget(self._rate)
         indicators_row.addWidget(self._zoom)
+        indicators_row.addWidget(self._render_quality)
+        indicators_row.addWidget(self._preview_res)
         indicators_row.addWidget(self._loop)
         control_zone.addWidget(self._indicators, 0)
 
