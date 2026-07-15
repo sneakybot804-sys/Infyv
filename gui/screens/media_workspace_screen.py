@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QSplitter,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -97,13 +98,33 @@ class _MediaWorkspace(QWidget):
         right_column.setObjectName("MediaWorkspaceRightSplitter")
         right_column.setChildrenCollapsible(False)
         right_column.setHandleWidth(handle_width)
+        # The lower pane tabs the Clip Inspector together with the AI
+        # Assistant so the AI panel reuses the existing right-column space
+        # without shrinking the Details or Inspector panels.
+        right_tabs = QTabWidget()
+        right_tabs.setObjectName("MediaWorkspaceRightTabs")
+        right_tabs.addTab(self._build_inspector(), "Inspector")
+        right_tabs.addTab(self._build_ai_assistant(), "AI")
+        right_tabs.setStyleSheet(
+            f"#MediaWorkspaceRightTabs::pane {{ border: none; }} "
+            f"#MediaWorkspaceRightTabs QTabBar::tab {{ "
+            f"background: {tokens.colors.surface}; "
+            f"color: {tokens.colors.text_muted}; "
+            f"border: 1px solid {tokens.colors.border}; "
+            f"border-top-left-radius: {tokens.radius.sm}px; "
+            f"border-top-right-radius: {tokens.radius.sm}px; "
+            f"padding: {tokens.spacing.xs}px {tokens.spacing.md}px; "
+            f"margin-right: {tokens.spacing.xxs}px; }} "
+            f"#MediaWorkspaceRightTabs QTabBar::tab:selected {{ "
+            f"color: {tokens.colors.accent_cyan}; "
+            f"border: 1px solid {tokens.colors.accent_cyan}; }}"
+        )
+
         right_column.addWidget(self._build_details())
-        right_column.addWidget(self._build_inspector())
-        right_column.addWidget(self._build_ai_assistant())
+        right_column.addWidget(right_tabs)
         right_column.setStretchFactor(0, 0)
         right_column.setStretchFactor(1, 1)
-        right_column.setStretchFactor(2, 0)
-        right_column.setSizes([300, 420, 340])
+        right_column.setSizes([320, 520])
 
         # Top editing area: sidebar | large preview | right column.
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
