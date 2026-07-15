@@ -147,6 +147,11 @@ class Timeline(ThemedWidget):
         self._column.setContentsMargins(0, 0, 0, 0)
         self._column.setSpacing(tokens.spacing.xs)
 
+        # Professional timeline toolbar (decorative placeholders; wired to
+        # nothing). Inserted above the ruler; the ruler / track-area / playhead
+        # order below it is unchanged.
+        self._build_toolbar()
+
         # Ruler strip (static tick labels across the duration).
         self._ruler = QFrame(self)
         self._ruler.setObjectName("TimelineRuler")
@@ -399,6 +404,56 @@ class Timeline(ThemedWidget):
         self._add_track_header(name)
         return lane
 
+    def _build_toolbar(self) -> QWidget:
+        """Build the decorative professional timeline toolbar (placeholders).
+
+        Adds a #TimelineToolbar strip above the ruler carrying static glyph
+        controls (undo / redo / cut / split / ripple / slip / slide / razor /
+        snap / magnet / track height / zoom / fit / marker / add-remove track)
+        grouped by thin separators. Every control is a QLabel wired to nothing
+        (no signals, no logic); new object names only.
+        """
+        tokens = self.tokens
+        self._toolbar = QFrame(self)
+        self._toolbar.setObjectName("TimelineToolbar")
+        self._toolbar.setFrameShape(QFrame.Shape.StyledPanel)
+        self._toolbar.setFixedHeight(self.scaled(tokens.spacing.xl))
+        row = QHBoxLayout(self._toolbar)
+        row.setContentsMargins(
+            tokens.spacing.sm, tokens.spacing.xxs,
+            tokens.spacing.sm, tokens.spacing.xxs,
+        )
+        row.setSpacing(tokens.spacing.sm)
+
+        # Groups of (glyph, tooltip); a None entry emits a thin separator.
+        groups = (
+            (("\u21b6", "Undo"), ("\u21b7", "Redo")),
+            (("\u2702", "Cut"), ("\u2223", "Split"), ("\u25a4", "Razor")),
+            (("\u2b0c", "Ripple"), ("\u2194", "Slip"), ("\u21c4", "Slide")),
+            (("\u25a6", "Snap"), ("\U0001f9f2", "Magnet")),
+            (("\u2195", "Track Height"),),
+            (("\u2795", "Zoom In"), ("\u2796", "Zoom Out"), ("\u2921", "Fit")),
+            (("\U0001f6a9", "Marker"),),
+            (("\u2795", "Add Track"), ("\U0001f5d1", "Remove Track")),
+        )
+        for gi, group in enumerate(groups):
+            for glyph, tip in group:
+                item = QLabel(glyph, self._toolbar)
+                item.setObjectName("TimelineToolItem")
+                item.setToolTip(tip)
+                item.setAccessibleName(tip)
+                item.setFont(self._theme.font("caption"))
+                item.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                row.addWidget(item)
+            if gi < len(groups) - 1:
+                sep = QFrame(self._toolbar)
+                sep.setObjectName("TimelineToolSeparator")
+                sep.setFrameShape(QFrame.Shape.VLine)
+                row.addWidget(sep)
+        row.addStretch(1)
+        self._column.addWidget(self._toolbar)
+        return self._toolbar
+
     def _add_track_header(self, name: str) -> QWidget:
         """Append a decorative Premiere-style track header (wired to nothing).
 
@@ -418,6 +473,18 @@ class Timeline(ThemedWidget):
             tokens.spacing.xs, tokens.spacing.xxs,
         )
         header_row.setSpacing(tokens.spacing.xs)
+
+        # Leading track color swatch + track number (decorative placeholders).
+        color_swatch = QFrame(header)
+        color_swatch.setObjectName("TimelineTrackColor")
+        color_swatch.setFixedWidth(self.scaled(tokens.spacing.xxs))
+        header_row.addWidget(color_swatch)
+
+        number = QLabel(str(len(self._header_widgets) + 1), header)
+        number.setObjectName("TimelineTrackNumber")
+        number.setFont(self._theme.font("caption"))
+        number.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        header_row.addWidget(number)
 
         collapse = QLabel("\u25be", header)  # down chevron (expanded look)
         collapse.setObjectName("TimelineTrackCollapse")
@@ -965,12 +1032,29 @@ class Timeline(ThemedWidget):
             f"border-radius: {radius_md}px; }}"
         )
 
+        # Timeline toolbar: a glass strip with muted tool glyphs and thin
+        # separators (decorative). Object-name-scoped; no hardcoded colors.
+        self._toolbar.setStyleSheet(
+            f"#TimelineToolbar {{ background: {colors.surface_elevated}; "
+            f"border: 1px solid {colors.glass_border}; "
+            f"border-radius: {radius_md}px; }} "
+            f"#TimelineToolItem {{ color: {colors.text_secondary}; "
+            f"background: transparent; }} "
+            f"#TimelineToolItem:hover {{ color: {colors.accent_cyan}; }} "
+            f"#TimelineToolSeparator {{ color: {colors.divider}; "
+            f"background: {colors.divider}; border: none; max-width: 1px; }}"
+        )
+
         # Track-header column: a layered glass rail matching the lanes, with
         # alternating header shading, soft borders and muted control glyphs;
         # the track name reads in accent-cyan. Decorative only.
         self._headers_container.setStyleSheet(
             f"#TimelineTrackHeaders {{ background: {colors.background_deep}; "
-            f"border-radius: {radius_md}px; }}"
+            f"border-radius: {radius_md}px; }} "
+            f"#TimelineTrackColor {{ background: {colors.accent_cyan}; "
+            f"border-radius: {radius}px; }} "
+            f"#TimelineTrackNumber {{ color: {colors.text_muted}; "
+            f"background: transparent; }}"
         )
         for index, header in enumerate(self._header_widgets):
             header_bg = (
