@@ -163,13 +163,33 @@ class Timeline(ThemedWidget):
         # clip select (M5), move (M6) and trim (M7) are unaffected.
         self._ruler.installEventFilter(self)
 
+        # Track area: a decorative header column beside the lane container.
+        # The lane container keeps its frozen object name, order and behavior;
+        # the header column is purely additive professional chrome.
+        self._track_area = QWidget(self)
+        self._track_area.setObjectName("TimelineTrackArea")
+        track_area_row = QHBoxLayout(self._track_area)
+        track_area_row.setContentsMargins(0, 0, 0, 0)
+        track_area_row.setSpacing(tokens.spacing.xs)
+
+        # Track-header column (decorative placeholders; wired to nothing).
+        self._headers_container = QWidget(self._track_area)
+        self._headers_container.setObjectName("TimelineTrackHeaders")
+        self._headers_layout = QVBoxLayout(self._headers_container)
+        self._headers_layout.setContentsMargins(0, 0, 0, 0)
+        self._headers_layout.setSpacing(tokens.spacing.xs)
+        self._headers_container.setFixedWidth(self.scaled(tokens.spacing.xxl) * 4)
+        self._header_widgets: List[QWidget] = []
+        track_area_row.addWidget(self._headers_container, 0)
+
         # Track lanes container.
-        self._tracks_container = QWidget(self)
+        self._tracks_container = QWidget(self._track_area)
         self._tracks_container.setObjectName("TimelineTracks")
         self._tracks_layout = QVBoxLayout(self._tracks_container)
         self._tracks_layout.setContentsMargins(0, 0, 0, 0)
         self._tracks_layout.setSpacing(tokens.spacing.xs)
-        self._column.addWidget(self._tracks_container, 1)
+        track_area_row.addWidget(self._tracks_container, 1)
+        self._column.addWidget(self._track_area, 1)
         # Empty-space clicks (on the tracks background) clear the selection.
         self._tracks_container.installEventFilter(self)
 
@@ -376,7 +396,55 @@ class Timeline(ThemedWidget):
         self._track_names.append(name)
         self._track_widgets.append(lane)
         self._tracks_layout.addWidget(lane)
+        self._add_track_header(name)
         return lane
+
+    def _add_track_header(self, name: str) -> QWidget:
+        """Append a decorative Premiere-style track header (wired to nothing).
+
+        Placeholder-only professional chrome: a collapse chevron, eye / mute /
+        solo / lock glyph toggles and a track-name label. It has no signals and
+        no logic; it exists purely to make each track read like a real editor's
+        track head. New object names only; the lane itself is untouched.
+        """
+        tokens = self.tokens
+        header = QFrame(self._headers_container)
+        header.setObjectName("TimelineTrackHeader")
+        header.setFrameShape(QFrame.Shape.StyledPanel)
+        header.setMinimumHeight(self.scaled(tokens.spacing.xxl))
+        header_row = QHBoxLayout(header)
+        header_row.setContentsMargins(
+            tokens.spacing.xs, tokens.spacing.xxs,
+            tokens.spacing.xs, tokens.spacing.xxs,
+        )
+        header_row.setSpacing(tokens.spacing.xs)
+
+        collapse = QLabel("\u25be", header)  # down chevron (expanded look)
+        collapse.setObjectName("TimelineTrackCollapse")
+        collapse.setFont(self._theme.font("caption"))
+        header_row.addWidget(collapse)
+
+        track_label = QLabel(name, header)
+        track_label.setObjectName("TimelineTrackName")
+        track_label.setFont(self._theme.font("body_small"))
+        header_row.addWidget(track_label, 1)
+
+        # Eye / Mute / Solo / Lock glyph toggles (static placeholders).
+        for glyph, obj_name in (
+            ("\U0001f441", "TimelineTrackEye"),
+            ("M", "TimelineTrackMute"),
+            ("S", "TimelineTrackSolo"),
+            ("\U0001f512", "TimelineTrackLock"),
+        ):
+            control = QLabel(glyph, header)
+            control.setObjectName(obj_name)
+            control.setFont(self._theme.font("caption"))
+            control.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            header_row.addWidget(control)
+
+        self._header_widgets.append(header)
+        self._headers_layout.addWidget(header)
+        return header
 
     def tracks(self) -> List[str]:
         """Return the current track names in order."""
@@ -562,14 +630,19 @@ class Timeline(ThemedWidget):
             widget = item.widget()
             if widget is not None:
                 widget.setParent(None)
-        # Five evenly spaced tick labels (0%..100% of duration).
-        for i in range(5):
-            seconds = self._duration * (i / 4.0)
-            label = QLabel(f"{seconds:.0f}s", self._ruler)
+        # A denser, cleaner professional time scale: evenly spaced ticks with
+        # mm:ss-style labels (decorative only; still #TimelineTick).
+        ticks = 9
+        last = ticks - 1
+        for i in range(ticks):
+            seconds = self._duration * (i / float(last))
+            minutes = int(seconds) // 60
+            secs = int(round(seconds)) % 60
+            label = QLabel(f"{minutes:02d}:{secs:02d}", self._ruler)
             label.setObjectName("TimelineTick")
             label.setFont(self._theme.font("caption"))
             self._ruler_row.addWidget(label)
-            if i < 4:
+            if i < last:
                 self._ruler_row.addStretch(1)
 
     def _rebuild_clips(self) -> None:
@@ -892,9 +965,36 @@ class Timeline(ThemedWidget):
             f"border-radius: {radius_md}px; }}"
         )
 
-        # Playhead: a thin accent-cyan line/handle with rounded ends.
+        # Track-header column: a layered glass rail matching the lanes, with
+        # alternating header shading, soft borders and muted control glyphs;
+        # the track name reads in accent-cyan. Decorative only.
+        self._headers_container.setStyleSheet(
+            f"#TimelineTrackHeaders {{ background: {colors.background_deep}; "
+            f"border-radius: {radius_md}px; }}"
+        )
+        for index, header in enumerate(self._header_widgets):
+            header_bg = (
+                colors.surface if index % 2 == 0 else colors.surface_overlay
+            )
+            header.setStyleSheet(
+                f"#TimelineTrackHeader {{ background: {header_bg}; "
+                f"border: 1px solid {colors.border}; "
+                f"border-radius: {radius}px; }} "
+                f"#TimelineTrackName {{ color: {colors.accent_cyan}; "
+                f"background: transparent; }} "
+                f"#TimelineTrackCollapse, #TimelineTrackEye, "
+                f"#TimelineTrackMute, #TimelineTrackSolo, "
+                f"#TimelineTrackLock {{ color: {colors.text_muted}; "
+                f"background: transparent; }}"
+            )
+
+        # Playhead: a brighter neon-cyan line with a rounded top handle glow.
         self._playhead_marker.setStyleSheet(
-            f"#TimelinePlayhead {{ background: {colors.accent_cyan}; "
+            f"#TimelinePlayhead {{ background: qlineargradient("
+            f"x1:0, y1:0, x2:1, y2:0, "
+            f"stop:0 transparent, stop:0.5 {colors.accent_cyan}, "
+            f"stop:1 transparent); "
+            f"border: 1px solid {colors.accent_cyan_glow}; "
             f"border-radius: {radius}px; }}"
         )
 
