@@ -190,13 +190,13 @@ class NavigationSidebar(ThemedWidget):
         return nav
 
     def _build_recent(self) -> QWidget:
-        """Build the Recent Projects list (24px below nav, 6px row gap)."""
+        """Build the Recent Projects list (24px below nav, 8px row gap)."""
         tokens = self.tokens
         wrap = QWidget(self)
         wrap.setObjectName("NavigationSidebarRecent")
         layout = QVBoxLayout(wrap)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(self.scaled(tokens.spacing.sm))
+        layout.setSpacing(self.scaled(tokens.spacing.sm))  # 8px
 
         header = SectionHeader(self._theme, "Recent Projects")
         layout.addWidget(header)
@@ -205,7 +205,7 @@ class NavigationSidebar(ThemedWidget):
         rows.setObjectName("NavigationRecentRows")
         rows_layout = QVBoxLayout(rows)
         rows_layout.setContentsMargins(0, 0, 0, 0)
-        rows_layout.setSpacing(self.scaled(tokens.spacing.xs) + 2)  # ~6px gap
+        rows_layout.setSpacing(self.scaled(tokens.spacing.sm))  # explicit 8px
 
         for name, when in _RECENT_PROJECTS:
             rows_layout.addWidget(self._recent_row(name, when))
@@ -249,7 +249,7 @@ class NavigationSidebar(ThemedWidget):
         wrap.setObjectName("NavigationSidebarSystem")
         layout = QVBoxLayout(wrap)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(self.scaled(tokens.spacing.md))  # 12px row gap
+        layout.setSpacing(self.scaled(tokens.spacing.sm))  # explicit 8px row gap
 
         header = SectionHeader(self._theme, "System Overview")
         layout.addWidget(header)
@@ -295,9 +295,11 @@ class NavigationSidebar(ThemedWidget):
         col.addWidget(sub_label)
 
         # Line 2: ultra-thin neon meter underneath the text.
+        # Track uses a faint white groove so it reads as a carved-in channel
+        # rather than disappearing into the dark panel background.
         bar = _ThinBar(
             fill_color=fill_color,
-            track_color=c.background_deep,
+            track_color="rgba(255, 255, 255, 0.05)",
             radius=self.scaled(tokens.radius.sm) // 4 or 1,
             percent=percent,
             parent=row,
@@ -398,16 +400,18 @@ class NavigationSidebar(ThemedWidget):
     def _update_nav_styles(self) -> None:
         """Apply active/inactive styling to each nav item."""
         c = self.tokens.colors
-        radius = self.scaled(self.tokens.radius.sm)
-        pad_v = self.scaled(self.tokens.spacing.sm)   # 8px
-        pad_h = self.scaled(self.tokens.spacing.md)   # 12px
+        # Border-radius 8px on the right corners only (blueprint spec).
+        radius = self.scaled(self.tokens.radius.sm)   # 8px
+        # 16px left/right padding so text is never squished against the edge.
+        pad_h = self.scaled(self.tokens.spacing.lg)   # 16px
         accent = self.tokens.colors.accent_cyan
 
         for index, item in enumerate(self._nav_buttons):
             if index == self._current:
                 item.setStyleSheet(
-                    # padding is purely visual inset; geometry is fixed by
-                    # setFixedHeight so the border-left is never clipped.
+                    # padding-left/right only: geometry is owned by
+                    # setFixedHeight(36px) so vertical padding is irrelevant
+                    # and would fight the fixed height.
                     f"#NavigationItem {{ color: {accent}; "
                     f"padding-left: {pad_h}px; padding-right: {pad_h}px; "
                     f"border-left: 3px solid {accent}; "
@@ -425,20 +429,31 @@ class NavigationSidebar(ThemedWidget):
                     f"border-bottom-right-radius: {radius}px; "
                     f"background: transparent; }} "
                     f"#NavigationItem:hover {{ "
-                    f"background: {c.glass_fill}; color: {c.text_primary}; }}"
+                    f"background: rgba(255, 255, 255, 0.05); "
+                    f"color: {c.text_primary}; }}"
                 )
 
     def apply_theme(self) -> None:
         """Apply the glassmorphic rail backing and refresh nav styling."""
         c = self.tokens.colors
         radius = self.scaled(self.tokens.radius.md)  # 12px
+        thumb_radius = self.scaled(self.tokens.radius.sm)  # 8px
         self.setStyleSheet(
-            f"#NavigationSidebar {{ background: {c.glass_fill}; "
-            f"border: 1px solid {c.glass_border}; "
+            # Deep semi-opaque surface so the rail reads as a solid premium
+            # panel rather than a transparent overlay. The border is a faint
+            # white edge that separates it from the workspace background.
+            f"#NavigationSidebar {{ "
+            f"background: rgba(18, 22, 33, 0.75); "
+            f"border: 1px solid rgba(255, 255, 255, 0.06); "
             f"border-radius: {radius}px; }} "
+            f"#NavigationSidebarNav {{ background: transparent; }} "
             f"#NavigationRecentThumb {{ background: {c.surface_overlay}; "
-            f"border-radius: {self.scaled(self.tokens.radius.sm)}px; }} "
+            f"border-radius: {thumb_radius}px; }} "
             f"#NavigationRecentName {{ color: {c.text_secondary}; "
-            f"background: transparent; }}"
+            f"background: transparent; }} "
+            f"#NavigationRecentRows {{ background: transparent; }} "
+            f"#NavigationSidebarRecent {{ background: transparent; }} "
+            f"#NavigationSidebarSystem {{ background: transparent; }} "
+            f"#NavigationSystemRow {{ background: transparent; }}"
         )
         self._update_nav_styles()
