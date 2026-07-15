@@ -141,9 +141,11 @@ class NavigationSidebar(ThemedWidget):
         self._current = current
         self._nav_buttons: List[QWidget] = []
 
-        # Lock the rail to a maximum of 240px (DPI-scaled).
-        self.setMaximumWidth(self.scaled(240))
-        self.setMinimumWidth(self.scaled(200))
+        # Lock the rail to exactly 240px (DPI-scaled) so the splitter never
+        # compresses or expands it and Qt's geometry engine has an unambiguous
+        # fixed size to work with.
+        fixed_w = self.scaled(240)
+        self.setFixedWidth(fixed_w)
 
         tokens = self.tokens
         root = QVBoxLayout(self)
@@ -171,10 +173,13 @@ class NavigationSidebar(ThemedWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(self.scaled(tokens.spacing.sm))  # 8px gap
 
+        row_h = self.scaled(36)  # explicit row height so QSS padding never
+        # collapses the geometry; 36px matches the blueprint spec.
         for index, label in enumerate(_NAV_ITEMS):
             item = QLabel(label, nav)
             item.setObjectName("NavigationItem")
             item.setFont(self._theme.font("body"))
+            item.setFixedHeight(row_h)
             item.setCursor(Qt.CursorShape.PointingHandCursor)
             # UI-only click handling via a lambda-bound mouse release.
             item.mouseReleaseEvent = (  # type: ignore[assignment]
@@ -401,8 +406,10 @@ class NavigationSidebar(ThemedWidget):
         for index, item in enumerate(self._nav_buttons):
             if index == self._current:
                 item.setStyleSheet(
+                    # padding is purely visual inset; geometry is fixed by
+                    # setFixedHeight so the border-left is never clipped.
                     f"#NavigationItem {{ color: {accent}; "
-                    f"padding: {pad_v}px {pad_h}px; "
+                    f"padding-left: {pad_h}px; padding-right: {pad_h}px; "
                     f"border-left: 3px solid {accent}; "
                     f"border-top-right-radius: {radius}px; "
                     f"border-bottom-right-radius: {radius}px; "
@@ -412,7 +419,7 @@ class NavigationSidebar(ThemedWidget):
             else:
                 item.setStyleSheet(
                     f"#NavigationItem {{ color: {c.text_secondary}; "
-                    f"padding: {pad_v}px {pad_h}px; "
+                    f"padding-left: {pad_h}px; padding-right: {pad_h}px; "
                     f"border-left: 3px solid transparent; "
                     f"border-top-right-radius: {radius}px; "
                     f"border-bottom-right-radius: {radius}px; "

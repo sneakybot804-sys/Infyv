@@ -95,6 +95,12 @@ class _MediaWorkspace(QWidget):
 
         self._browser = MediaBrowser(theme, items=list(_DEMO_ITEMS))
         self._browser.setMinimumWidth(240)
+        # Hidden in the Milestone 2 layout: the NavigationSidebar's "Media"
+        # nav item is the entry point for this milestone. MediaBrowser and all
+        # its frozen APIs/signals remain fully intact; it is only hidden so it
+        # does not render as a duplicate left column alongside the new rail.
+        # A future milestone will toggle its visibility from the nav item.
+        self._browser.hide()
         self._preview_header = SectionHeader(
             theme, "Preview", subtitle="No clip selected"
         )
@@ -145,14 +151,16 @@ class _MediaWorkspace(QWidget):
         splitter.setHandleWidth(handle_width)
         self._sidebar = NavigationSidebar(self._theme)
         splitter.addWidget(self._sidebar)
-        splitter.addWidget(self._browser)
+        splitter.addWidget(self._browser)   # hidden; APIs/signals intact
         splitter.addWidget(self._build_preview())
         splitter.addWidget(right_column)
-        splitter.setStretchFactor(0, 0)  # navigation rail
-        splitter.setStretchFactor(1, 0)  # media browser
-        splitter.setStretchFactor(2, 1)  # preview grows
-        splitter.setStretchFactor(3, 0)  # right column
-        splitter.setSizes([240, 260, 940, 300])
+        splitter.setStretchFactor(0, 0)  # navigation rail  (fixed 240px)
+        splitter.setStretchFactor(1, 0)  # media browser    (hidden, 0px)
+        splitter.setStretchFactor(2, 1)  # preview          (grows)
+        splitter.setStretchFactor(3, 0)  # right column     (fixed-ish)
+        # Browser is hidden so its slot collapses to 0; sidebar gets its full
+        # 240px and the preview takes the remaining horizontal space.
+        splitter.setSizes([240, 0, 940, 300])
 
         # Outer vertical split: the editing area over a generous, resizable
         # Timeline region (the timeline is a first-class region, not a strip).
