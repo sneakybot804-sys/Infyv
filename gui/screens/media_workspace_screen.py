@@ -40,6 +40,7 @@ from gui.widgets.dropdown import Dropdown
 from gui.widgets.glass_card import GlassCard
 from gui.widgets.media_browser import MediaBrowser
 from gui.widgets.meta_label import MetaLabel
+from gui.widgets.navigation_sidebar import NavigationSidebar
 from gui.widgets.neon_button import NeonButton
 from gui.widgets.section_header import SectionHeader
 from gui.widgets.status_badge import StatusBadge
@@ -142,13 +143,16 @@ class _MediaWorkspace(QWidget):
         splitter.setObjectName("MediaWorkspaceSplitter")
         splitter.setChildrenCollapsible(False)
         splitter.setHandleWidth(handle_width)
+        self._sidebar = NavigationSidebar(self._theme)
+        splitter.addWidget(self._sidebar)
         splitter.addWidget(self._browser)
         splitter.addWidget(self._build_preview())
         splitter.addWidget(right_column)
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
-        splitter.setStretchFactor(2, 0)
-        splitter.setSizes([260, 940, 300])
+        splitter.setStretchFactor(0, 0)  # navigation rail
+        splitter.setStretchFactor(1, 0)  # media browser
+        splitter.setStretchFactor(2, 1)  # preview grows
+        splitter.setStretchFactor(3, 0)  # right column
+        splitter.setSizes([240, 260, 940, 300])
 
         # Outer vertical split: the editing area over a generous, resizable
         # Timeline region (the timeline is a first-class region, not a strip).
