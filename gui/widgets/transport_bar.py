@@ -10,23 +10,45 @@ in ``[0.0, 1.0]``. It performs no real playback, opens no media, and never
 touches :mod:`gui_core`. All behaviour is signals + internal state so a future
 milestone can bind it to an actual player.
 
+Phase 10C (professional transport, UI-only, additive): the flat button+seek
+row is arranged into a professional three-zone desktop transport -- a left
+status-badge cluster (GPU / AI / project FPS), a centered large-playback
+control group flanked by soft separators with a monospace timecode readout, a
+right indicator cluster (playback rate / zoom percentage / loop), and a
+full-width seek scrubber row beneath. The extra chrome is composed from the
+existing widget library and is decorative/placeholder wired to nothing; the
+frozen controls, public API, signals and state machine are unchanged.
+
 Stable object names for later integration and tests:
 
 * ``TransportBar`` -- the root widget
 * ``TransportPlay`` / ``TransportPause`` / ``TransportStop`` -- the buttons
 * ``TransportSeek`` -- the seek slider
+
+Additive Phase 10C object names (decorative chrome, wired to nothing):
+
+* ``TransportBadges`` / ``TransportGpuBadge`` / ``TransportAiBadge`` /
+  ``TransportFpsBadge`` -- the left status cluster.
+* ``TransportControls`` -- the centered playback control group.
+* ``TransportSeparatorLeft`` / ``TransportSeparatorRight`` -- soft separators.
+* ``TransportTimecode`` -- the monospace timecode readout.
+* ``TransportIndicators`` / ``TransportRate`` / ``TransportZoom`` /
+  ``TransportLoop`` -- the right indicator cluster.
+* ``TransportSeekRow`` -- the full-width seek scrubber row.
 """
 from __future__ import annotations
 
 from typing import Optional
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QHBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QWidget
 
 from gui.theme.manager import ThemeManager
 from gui.widgets.base import ThemedWidget
+from gui.widgets.meta_label import MetaLabel
 from gui.widgets.neon_button import NeonButton
 from gui.widgets.slider import Slider
+from gui.widgets.status_badge import StatusBadge
 
 #: The frozen transport-state vocabulary for this milestone.
 STATES = ("stopped", "playing", "paused")
@@ -71,36 +93,114 @@ class TransportBar(ThemedWidget):
 
         tokens = self.tokens
 
-        row = QHBoxLayout(self)
-        # Inset padding so the controls sit inside a padded transport bar
-        # rather than flush against the edges (layout values only).
-        row.setContentsMargins(
+        # Root: a control zone stacked over a full-width seek scrubber.
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(
             tokens.spacing.md, tokens.spacing.sm, tokens.spacing.md, tokens.spacing.sm
         )
-        row.setSpacing(tokens.spacing.sm)
+        outer.setSpacing(tokens.spacing.sm)
+
+        # --- Control zone: left badges | centered controls | right meters --- #
+        control_zone = QHBoxLayout()
+        control_zone.setContentsMargins(0, 0, 0, 0)
+        control_zone.setSpacing(tokens.spacing.md)
+
+        # Left: decorative status badges (GPU / AI / project FPS).
+        self._badges = QWidget(self)
+        self._badges.setObjectName("TransportBadges")
+        badges_row = QHBoxLayout(self._badges)
+        badges_row.setContentsMargins(0, 0, 0, 0)
+        badges_row.setSpacing(tokens.spacing.xs)
+        self._gpu_badge = StatusBadge(self._theme, "GPU", status="success")
+        self._gpu_badge.setObjectName("TransportGpuBadge")
+        self._ai_badge = StatusBadge(self._theme, "AI", status="info")
+        self._ai_badge.setObjectName("TransportAiBadge")
+        self._fps_badge = StatusBadge(self._theme, "60 FPS", status="neutral")
+        self._fps_badge.setObjectName("TransportFpsBadge")
+        badges_row.addWidget(self._gpu_badge)
+        badges_row.addWidget(self._ai_badge)
+        badges_row.addWidget(self._fps_badge)
+        control_zone.addWidget(self._badges, 0)
+
+        control_zone.addStretch(1)
+
+        # Center: the large playback control group with soft separators and a
+        # monospace timecode readout. The frozen Play / Pause / Stop buttons
+        # are added here exactly as before (same handlers and signals).
+        self._controls = QWidget(self)
+        self._controls.setObjectName("TransportControls")
+        controls_row = QHBoxLayout(self._controls)
+        controls_row.setContentsMargins(0, 0, 0, 0)
+        controls_row.setSpacing(tokens.spacing.sm)
+
+        self._timecode = MetaLabel(
+            self._theme, "00:00:00:00", role="secondary", style="mono"
+        )
+        self._timecode.setObjectName("TransportTimecode")
+        controls_row.addWidget(self._timecode)
+
+        self._separator_left = QFrame(self._controls)
+        self._separator_left.setObjectName("TransportSeparatorLeft")
+        self._separator_left.setFrameShape(QFrame.Shape.VLine)
+        controls_row.addWidget(self._separator_left)
 
         self._play = NeonButton(self._theme, "Play", variant="primary", accent="cyan")
         self._play.setObjectName("TransportPlay")
         self._play.clicked.connect(self._on_play)
-        row.addWidget(self._play)
+        controls_row.addWidget(self._play)
 
         self._pause = NeonButton(self._theme, "Pause", variant="secondary", accent="cyan")
         self._pause.setObjectName("TransportPause")
         self._pause.clicked.connect(self._on_pause)
-        row.addWidget(self._pause)
+        controls_row.addWidget(self._pause)
 
         self._stop = NeonButton(self._theme, "Stop", variant="ghost", accent="cyan")
         self._stop.setObjectName("TransportStop")
         self._stop.clicked.connect(self._on_stop)
-        row.addWidget(self._stop)
+        controls_row.addWidget(self._stop)
 
+        self._separator_right = QFrame(self._controls)
+        self._separator_right.setObjectName("TransportSeparatorRight")
+        self._separator_right.setFrameShape(QFrame.Shape.VLine)
+        controls_row.addWidget(self._separator_right)
+
+        control_zone.addWidget(self._controls, 0)
+
+        control_zone.addStretch(1)
+
+        # Right: decorative indicator meters (rate / zoom / loop).
+        self._indicators = QWidget(self)
+        self._indicators.setObjectName("TransportIndicators")
+        indicators_row = QHBoxLayout(self._indicators)
+        indicators_row.setContentsMargins(0, 0, 0, 0)
+        indicators_row.setSpacing(tokens.spacing.md)
+        self._rate = MetaLabel(self._theme, "1.0x", role="muted", style="mono")
+        self._rate.setObjectName("TransportRate")
+        self._zoom = MetaLabel(self._theme, "100%", role="muted", style="mono")
+        self._zoom.setObjectName("TransportZoom")
+        self._loop = MetaLabel(self._theme, "Loop", role="muted", style="body_small")
+        self._loop.setObjectName("TransportLoop")
+        indicators_row.addWidget(self._rate)
+        indicators_row.addWidget(self._zoom)
+        indicators_row.addWidget(self._loop)
+        control_zone.addWidget(self._indicators, 0)
+
+        outer.addLayout(control_zone)
+
+        # --- Seek scrubber row: full-width normalized [0, 1] seek slider. --- #
+        self._seek_row = QWidget(self)
+        self._seek_row.setObjectName("TransportSeekRow")
+        seek_layout = QHBoxLayout(self._seek_row)
+        seek_layout.setContentsMargins(0, 0, 0, 0)
+        seek_layout.setSpacing(0)
         # Seek placeholder: normalized [0, 1]; emits seek_requested on change.
         self._seek = Slider(
             self._theme, minimum=0.0, maximum=1.0, value=0.0, accent="cyan"
         )
         self._seek.setObjectName("TransportSeek")
         self._seek.value_changed.connect(self._on_seek)
-        row.addWidget(self._seek, 1)
+        seek_layout.addWidget(self._seek, 1)
+        outer.addWidget(self._seek_row)
 
         self.setAccessibleName("transport controls")
         self.apply_theme()
@@ -189,12 +289,31 @@ class TransportBar(ThemedWidget):
 
         # Transport root: a layered elevated surface with a subtle vertical
         # gradient, a soft glass border and rounded corners, so the transport
-        # reads as a first-class docked control strip.
+        # reads as a first-class docked control strip. The zone containers are
+        # transparent so the root surface reads as a single glass bar.
         self.setStyleSheet(
             f"#TransportBar {{ background: qlineargradient("
             f"x1: 0, y1: 0, x2: 0, y2: 1, "
             f"stop: 0 {colors.surface_elevated}, "
             f"stop: 1 {colors.surface}); "
             f"border: 1px solid {colors.border}; "
-            f"border-radius: {radius_lg}px; }}"
+            f"border-radius: {radius_lg}px; }} "
+            f"#TransportBadges, #TransportControls, #TransportIndicators, "
+            f"#TransportSeekRow {{ background: transparent; }}"
+        )
+
+        # Soft vertical separators framing the centered control group.
+        separator_qss = (
+            f"QFrame#TransportSeparatorLeft, QFrame#TransportSeparatorRight {{ "
+            f"color: {colors.divider}; "
+            f"background: {colors.divider}; "
+            f"border: none; max-width: 1px; }}"
+        )
+        self._separator_left.setStyleSheet(separator_qss)
+        self._separator_right.setStyleSheet(separator_qss)
+
+        # Monospace timecode readout: an accent-cyan, mono chrome value.
+        self._timecode.setStyleSheet(
+            f"#TransportTimecode {{ color: {colors.accent_cyan}; "
+            f"background: transparent; }}"
         )
