@@ -30,29 +30,38 @@ DARK_THEME_NAME = "dark"
 
 
 _DARK_COLORS = ColorTokens(
-    # Layered near-black navy backgrounds create depth under glass panels.
-    background_base="#0a0d16",
-    background_deep="#05070d",
-    surface="#111524",
-    surface_elevated="#171c30",
-    surface_overlay="#1d2340",
-    # Glass: cool translucent fill with a faint light edge and top sheen.
-    glass_fill="rgba(255, 255, 255, 0.05)",
-    glass_border="rgba(255, 255, 255, 0.10)",
-    glass_highlight="rgba(255, 255, 255, 0.16)",
+    # Layered navy-slate surfaces with a wide luminance step between each
+    # layer, so the application background, workspace, secondary panels,
+    # primary panels and floating controls read as clearly distinct depths
+    # (this is the main driver of the redesigned hierarchy):
+    #   background_deep  -> the app void behind everything (deepest)
+    #   background_base  -> the application background
+    #   surface          -> secondary panels
+    #   surface_elevated -> primary panels / cards
+    #   surface_overlay  -> floating controls / hover / popups (lightest)
+    background_deep="#04060c",
+    background_base="#0b0f1a",
+    surface="#141a2b",
+    surface_elevated="#1e2740",
+    surface_overlay="#2a3557",
+    # Glass: richer cool translucent fill with a clearer light edge and sheen.
+    glass_fill="rgba(255, 255, 255, 0.06)",
+    glass_border="rgba(255, 255, 255, 0.14)",
+    glass_highlight="rgba(255, 255, 255, 0.22)",
     # Neon accents (base) + softer translucent glow used for outer glow/shadow.
-    accent_blue="#3b82f6",
-    accent_blue_glow="rgba(59, 130, 246, 0.55)",
-    accent_cyan="#22d3ee",
-    accent_cyan_glow="rgba(34, 211, 238, 0.55)",
-    accent_purple="#a855f7",
-    accent_purple_glow="rgba(168, 85, 247, 0.55)",
-    # Text shades.
-    text_primary="#eef2ff",
-    text_secondary="#b4bcd8",
-    text_muted="#7c86a6",
-    text_disabled="#4b5268",
-    text_on_accent="#05070d",
+    # Slightly punchier premium accents (not gaming-RGB).
+    accent_blue="#4f8dff",
+    accent_blue_glow="rgba(79, 141, 255, 0.60)",
+    accent_cyan="#2ee6ff",
+    accent_cyan_glow="rgba(46, 230, 255, 0.60)",
+    accent_purple="#b569ff",
+    accent_purple_glow="rgba(181, 105, 255, 0.60)",
+    # Text shades with more contrast between levels.
+    text_primary="#f4f7ff",
+    text_secondary="#c2cbe6",
+    text_muted="#828db0",
+    text_disabled="#4d5570",
+    text_on_accent="#04060c",
     # Status.
     success="#34d399",
     success_glow="rgba(52, 211, 153, 0.50)",
@@ -60,10 +69,11 @@ _DARK_COLORS = ColorTokens(
     warning_glow="rgba(251, 191, 36, 0.50)",
     error="#f87171",
     error_glow="rgba(248, 113, 113, 0.50)",
-    # Lines / focus.
-    border="rgba(255, 255, 255, 0.08)",
-    divider="rgba(255, 255, 255, 0.06)",
-    focus_ring="rgba(34, 211, 238, 0.70)",
+    # Lines / focus: slightly stronger so hierarchy reads without heavy
+    # outlines everywhere.
+    border="rgba(255, 255, 255, 0.10)",
+    divider="rgba(255, 255, 255, 0.07)",
+    focus_ring="rgba(46, 230, 255, 0.75)",
 )
 
 
@@ -71,28 +81,34 @@ _DARK_TYPOGRAPHY = TypographyTokens(
     family_primary="Inter",
     family_mono="JetBrains Mono",
     fallback_families=("Segoe UI", "Roboto", "Arial", "sans-serif"),
-    display=TypeStyle(size_px=34, weight=700, line_height=1.2, letter_spacing=-0.5),
-    h1=TypeStyle(size_px=26, weight=700, line_height=1.25, letter_spacing=-0.3),
-    h2=TypeStyle(size_px=20, weight=600, line_height=1.3),
-    h3=TypeStyle(size_px=16, weight=600, line_height=1.35),
-    body=TypeStyle(size_px=14, weight=400, line_height=1.5),
-    body_small=TypeStyle(size_px=13, weight=400, line_height=1.5),
-    caption=TypeStyle(size_px=12, weight=500, line_height=1.4, letter_spacing=0.2),
-    mono=TypeStyle(size_px=13, weight=400, line_height=1.5),
+    # A wider modular scale so each level reads as a distinct rank instead of
+    # near-identical sizes: big tight-tracked headings down to a small,
+    # wide-tracked caption.
+    display=TypeStyle(size_px=40, weight=800, line_height=1.15, letter_spacing=-0.6),
+    h1=TypeStyle(size_px=30, weight=700, line_height=1.2, letter_spacing=-0.4),
+    h2=TypeStyle(size_px=22, weight=700, line_height=1.28, letter_spacing=-0.2),
+    h3=TypeStyle(size_px=17, weight=600, line_height=1.35),
+    body=TypeStyle(size_px=14, weight=400, line_height=1.55),
+    body_small=TypeStyle(size_px=12, weight=400, line_height=1.5),
+    caption=TypeStyle(size_px=11, weight=600, line_height=1.35, letter_spacing=0.4),
+    mono=TypeStyle(size_px=13, weight=500, line_height=1.5),
 )
 
 
 _DARK_SPACING = SpacingTokens(xxs=2, xs=4, sm=8, md=12, lg=16, xl=24, xxl=32)
 
-_DARK_RADIUS = RadiusTokens(sm=6, md=10, lg=16, xl=22, pill=999)
+# Softer, more modern corner scale (still ascending; pill largest).
+_DARK_RADIUS = RadiusTokens(sm=8, md=12, lg=18, xl=26, pill=999)
 
+# Deeper, richer elevation so cards and floating panels genuinely pop off the
+# workspace; stronger neon glows for the accent halo.
 _DARK_SHADOWS = ShadowTokens(
-    low=ShadowToken(blur=12, x=0, y=2, color="rgba(0, 0, 0, 0.45)"),
-    medium=ShadowToken(blur=24, x=0, y=8, color="rgba(0, 0, 0, 0.55)"),
-    high=ShadowToken(blur=48, x=0, y=16, color="rgba(0, 0, 0, 0.65)"),
-    glow_blue=ShadowToken(blur=28, x=0, y=0, color="rgba(59, 130, 246, 0.55)"),
-    glow_cyan=ShadowToken(blur=28, x=0, y=0, color="rgba(34, 211, 238, 0.55)"),
-    glow_purple=ShadowToken(blur=28, x=0, y=0, color="rgba(168, 85, 247, 0.55)"),
+    low=ShadowToken(blur=18, x=0, y=4, color="rgba(0, 0, 0, 0.50)"),
+    medium=ShadowToken(blur=36, x=0, y=12, color="rgba(0, 0, 0, 0.62)"),
+    high=ShadowToken(blur=64, x=0, y=24, color="rgba(0, 0, 0, 0.72)"),
+    glow_blue=ShadowToken(blur=34, x=0, y=0, color="rgba(79, 141, 255, 0.60)"),
+    glow_cyan=ShadowToken(blur=34, x=0, y=0, color="rgba(46, 230, 255, 0.60)"),
+    glow_purple=ShadowToken(blur=34, x=0, y=0, color="rgba(181, 105, 255, 0.60)"),
 )
 
 _DARK_BLUR = BlurTokens(panel=18, backdrop=32, heavy=48)
