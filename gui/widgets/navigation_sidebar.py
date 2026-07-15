@@ -30,10 +30,12 @@ from __future__ import annotations
 from typing import List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QPainter
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QStyleOption,
     QVBoxLayout,
     QWidget,
 )
@@ -141,38 +143,61 @@ class NavigationSidebar(ThemedWidget):
         self._current = current
         self._nav_buttons: List[QWidget] = []
 
-        # Lock the rail to exactly 240px (DPI-scaled) so the splitter never
-        # compresses or expands it and Qt's geometry engine has an unambiguous
-        # fixed size to work with.
-        fixed_w = self.scaled(240)
-        self.setFixedWidth(fixed_w)
+        # Lock the rail to exactly 240px (DPI-scaled).
+        self.setFixedWidth(self.scaled(240))
 
-        # Required for QWidget subclasses: without this attribute Qt ignores
-        # background-color in QSS and the panel surface never paints.
+        # WA_StyledBackground: required so Qt honours background-color in QSS
+        # for plain QWidget subclasses. Without it the panel never paints.
         self.setAttribute(Qt.WA_StyledBackground, True)
 
         tokens = self.tokens
         root = QVBoxLayout(self)
-        # Pass four explicit integers so DPI rounding on a single scaled()
-        # call cannot produce asymmetric margins.
-        m = self.scaled(tokens.spacing.lg)  # 16px
+        m = self.scaled(tokens.spacing.lg)  # 16px on all four sides
         root.setContentsMargins(m, m, m, m)
         root.setSpacing(self.scaled(tokens.spacing.xl))  # 24px between blocks
 
-        # stretch=0 for nav and recent so they size to their natural heights;
-        # the expanding spacer between recent and system provides all the
-        # breathing room, keeping the footer pinned to the bottom.
+        # All sections use stretch=0 (natural height). The single addStretch(1)
+        # between Recent Projects and System Overview absorbs all spare vertical
+        # space, pinning the footer to the bottom without compressing the nav.
         root.addWidget(self._build_nav(), 0)
         root.addWidget(self._build_recent(), 0)
-        root.addStretch(1)  # pushes system + AI card to the bottom
+        root.addStretch(1)
         root.addWidget(self._build_system(), 0)
         root.addWidget(self._build_ai_status(), 0)
 
-        self._update_nav_styles()
+        # apply_theme sets the panel background and calls _update_nav_styles.
+        # The showEvent override below re-applies nav styles after Qt's first
+        # layout pass so the active highlight is never wiped by a cascade reset.
         self.apply_theme()
-        # Second explicit call: guarantees the active-item highlight survives
-        # any stylesheet cascade reset that apply_theme() may trigger on
-        # child widgets during the first paint cycle.
+
+    # ------------------------------------------------------------------ #
+    # Qt overrides
+    # ------------------------------------------------------------------ #
+    def paintEvent(self, event) -> None:  # noqa: N802
+        """Paint the styled background explicitly.
+
+        QWidget subclasses with WA_StyledBackground still need a paintEvent
+        that calls drawPrimitive(PE_Widget) for the background-color rule to
+        render. Without this override the panel surface stays transparent even
+        when the attribute and QSS rule are both correctly set.
+        """
+        opt = QStyleOption()
+        opt.initFrom(self)
+        painter = QPainter(self)
+        self.style().drawPrimitive(
+            self.style().PrimitiveElement.PE_Widget, opt, painter, self
+        )
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        """Re-apply nav styles after Qt's first layout and stylesheet pass.
+
+        Qt defers stylesheet application until the widget is shown. Any
+        setStyleSheet call made before show() can be overwritten by the
+        cascade reset that happens during the initial paint cycle. Calling
+        _update_nav_styles() here guarantees the active-item highlight is
+        applied after that reset has settled.
+        """
+        super().showEvent(event)
         self._update_nav_styles()
 
     # ------------------------------------------------------------------ #
@@ -452,23 +477,24 @@ class NavigationSidebar(ThemedWidget):
     def apply_theme(self) -> None:
         """Apply the glassmorphic rail backing and refresh nav styling."""
         c = self.tokens.colors
-        radius = self.scaled(self.tokens.radius.md)  # 12px
-        thumb_radius = self.scaled(self.tokens.radius.sm)  # 8px
+        radius = self.scaled(self.tokens.radius.md)   # 12px
+        thumb_r = self.scaled(self.tokens.radius.sm)  # 8px
+        # background-color (not the background shorthand) is required for
+        # the fill to paint on a QWidget with WA_StyledBackground. The
+        # paintEvent override above ensures drawPrimitive is called so this
+        # rule actually takes effect.
         self.setStyleSheet(
-            # QWidget#Name with background-color (not background shorthand)
-            # is required for the fill to paint; WA_StyledBackground must
-            # also be set (done in __init__) for this rule to take effect.
             f"QWidget#NavigationSidebar {{ "
             f"background-color: rgba(18, 22, 33, 0.85); "
             f"border: 1px solid rgba(255, 255, 255, 0.08); "
             f"border-radius: {radius}px; }} "
             f"#NavigationSidebarNav {{ background: transparent; }} "
+            f"#NavigationSidebarRecent {{ background: transparent; }} "
+            f"#NavigationRecentRows {{ background: transparent; }} "
             f"#NavigationRecentThumb {{ background-color: {c.surface_overlay}; "
-            f"border-radius: {thumb_radius}px; }} "
+            f"border-radius: {thumb_r}px; }} "
             f"#NavigationRecentName {{ color: {c.text_secondary}; "
             f"background: transparent; }} "
-            f"#NavigationRecentRows {{ background: transparent; }} "
-            f"#NavigationSidebarRecent {{ background: transparent; }} "
             f"#NavigationSidebarSystem {{ background: transparent; }} "
             f"#NavigationSystemRow {{ background: transparent; }}"
         )
