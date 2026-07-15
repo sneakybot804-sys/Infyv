@@ -35,11 +35,15 @@ from PySide6.QtWidgets import (
 
 from gui.theme.manager import ThemeManager
 from gui.widgets.clip_inspector import ClipInspector
+from gui.widgets.dropdown import Dropdown
 from gui.widgets.glass_card import GlassCard
 from gui.widgets.media_browser import MediaBrowser
 from gui.widgets.meta_label import MetaLabel
+from gui.widgets.neon_button import NeonButton
 from gui.widgets.section_header import SectionHeader
+from gui.widgets.status_badge import StatusBadge
 from gui.widgets.timeline import Timeline
+from gui.widgets.toggle_switch import ToggleSwitch
 from gui.widgets.transport_bar import TransportBar
 
 #: Static/demo media used to seed the browser (no filesystem access).
@@ -167,6 +171,55 @@ class _MediaWorkspace(QWidget):
         self._preview_header.set_divider(True)
         inner.addWidget(self._preview_header)
 
+        # --- Phase 10F: viewer toolbar (decorative, wired to nothing) --- #
+        viewer_toolbar = QWidget(content)
+        viewer_toolbar.setObjectName("MediaWorkspaceViewerToolbar")
+        vt_row = QHBoxLayout(viewer_toolbar)
+        vt_row.setContentsMargins(
+            tokens.spacing.sm, tokens.spacing.xs, tokens.spacing.sm, tokens.spacing.xs
+        )
+        vt_row.setSpacing(tokens.spacing.sm)
+        zoom_dropdown = Dropdown(
+            self._theme,
+            items=["Fit", "25%", "50%", "100%", "200%"],
+            current=0,
+            accent="cyan",
+        )
+        zoom_dropdown.setObjectName("MediaWorkspaceViewerZoom")
+        vt_row.addWidget(zoom_dropdown, 0)
+        fit_btn = NeonButton(self._theme, "Fit", variant="ghost", accent="cyan")
+        fit_btn.setObjectName("MediaWorkspaceViewerFit")
+        vt_row.addWidget(fit_btn, 0)
+        full_btn = NeonButton(self._theme, "100%", variant="ghost", accent="cyan")
+        full_btn.setObjectName("MediaWorkspaceViewerHundred")
+        vt_row.addWidget(full_btn, 0)
+        vt_row.addStretch(1)
+        safe_toggle = ToggleSwitch(self._theme, checked=False, accent="cyan")
+        safe_toggle.setObjectName("MediaWorkspaceViewerSafeToggle")
+        vt_row.addWidget(MetaLabel(self._theme, "Safe", role="muted", style="caption"), 0)
+        vt_row.addWidget(safe_toggle, 0)
+        grid_toggle = ToggleSwitch(self._theme, checked=False, accent="purple")
+        grid_toggle.setObjectName("MediaWorkspaceViewerGridToggle")
+        vt_row.addWidget(MetaLabel(self._theme, "Grid", role="muted", style="caption"), 0)
+        vt_row.addWidget(grid_toggle, 0)
+        shot_btn = NeonButton(
+            self._theme, "Screenshot", variant="ghost", accent="cyan"
+        )
+        shot_btn.setObjectName("MediaWorkspaceViewerScreenshot")
+        vt_row.addWidget(shot_btn, 0)
+        fs_btn = NeonButton(
+            self._theme, "Fullscreen", variant="ghost", accent="cyan"
+        )
+        fs_btn.setObjectName("MediaWorkspaceViewerFullscreen")
+        vt_row.addWidget(fs_btn, 0)
+        viewer_toolbar.setStyleSheet(
+            f"#MediaWorkspaceViewerToolbar {{ "
+            f"background: {tokens.colors.surface}; "
+            f"border: 1px solid {tokens.colors.border}; "
+            f"border-radius: {tokens.radius.md}px; }}"
+        )
+        inner.addWidget(viewer_toolbar)
+
         # Cinematic preview stage: a deep gradient backdrop with a soft glass
         # border, a glass HUD overlay (timecode + badges), a subtle safe-area
         # guide, and a centered premium empty state.
@@ -232,6 +285,7 @@ class _MediaWorkspace(QWidget):
             ("1920\u00d71080", "MediaWorkspacePreviewResBadge"),
             ("30 fps", "MediaWorkspacePreviewFpsBadge"),
             ("100%", "MediaWorkspacePreviewZoomBadge"),
+            ("Ready", "MediaWorkspacePreviewStatusBadge"),
         ):
             badge = QLabel(text, hud)
             badge.setObjectName(name)
@@ -242,6 +296,29 @@ class _MediaWorkspace(QWidget):
             hud_row.addWidget(badge)
 
         stage_layout.addWidget(hud)
+
+        # Decorative viewer overlay guides: a rule-of-thirds / safe-area frame
+        # and a center crosshair (subtle, wired to nothing).
+        safe_area = QFrame(stage)
+        safe_area.setObjectName("MediaWorkspacePreviewSafeArea")
+        safe_area.setStyleSheet(
+            f"#MediaWorkspacePreviewSafeArea {{ background: transparent; "
+            f"border: 1px dashed {c.glass_border}; "
+            f"border-radius: {tokens.radius.sm}px; }}"
+        )
+        crosshair = QFrame(safe_area)
+        crosshair.setObjectName("MediaWorkspacePreviewCrosshair")
+        crosshair.setFixedHeight(1)
+        crosshair.setStyleSheet(
+            f"#MediaWorkspacePreviewCrosshair {{ "
+            f"background: {c.glass_border}; border: none; }}"
+        )
+        safe_layout = QVBoxLayout(safe_area)
+        safe_layout.setContentsMargins(0, 0, 0, 0)
+        safe_layout.addStretch(1)
+        safe_layout.addWidget(crosshair)
+        safe_layout.addStretch(1)
+        stage_layout.addWidget(safe_area, 1)
 
         # Centered premium empty state (keeps the existing object name / type).
         stage_layout.addStretch(1)
@@ -270,6 +347,54 @@ class _MediaWorkspace(QWidget):
 
         self._transport = TransportBar(self._theme)
         inner.addWidget(self._transport)
+
+        # --- Phase 10F: bottom player toolbar (decorative caption strip) --- #
+        player_toolbar = QWidget(content)
+        player_toolbar.setObjectName("MediaWorkspacePlayerToolbar")
+        pt_row = QHBoxLayout(player_toolbar)
+        pt_row.setContentsMargins(
+            tokens.spacing.md, tokens.spacing.xs, tokens.spacing.md, tokens.spacing.xs
+        )
+        pt_row.setSpacing(tokens.spacing.md)
+        for text, name in (
+            ("00:00:00", "MediaWorkspacePlayerCurrentTime"),
+            ("/ 00:00:32", "MediaWorkspacePlayerDuration"),
+            ("Zoom 100%", "MediaWorkspacePlayerZoom"),
+            ("Speed 1.0x", "MediaWorkspacePlayerSpeed"),
+            ("Loop", "MediaWorkspacePlayerLoop"),
+            ("Viewer: Ready", "MediaWorkspacePlayerStatus"),
+            ("Quality: Full", "MediaWorkspacePlayerQuality"),
+        ):
+            detail = MetaLabel(self._theme, text, role="muted", style="caption")
+            detail.setObjectName(name)
+            pt_row.addWidget(detail, 0)
+            if name == "MediaWorkspacePlayerDuration":
+                pt_row.addStretch(1)
+        player_toolbar.setStyleSheet(
+            f"#MediaWorkspacePlayerToolbar {{ "
+            f"background: {tokens.colors.surface}; "
+            f"border: 1px solid {tokens.colors.border}; "
+            f"border-radius: {tokens.radius.md}px; }}"
+        )
+        inner.addWidget(player_toolbar)
+
+        # --- Phase 10F: viewer footer (decorative badge strip) --- #
+        viewer_footer = QWidget(content)
+        viewer_footer.setObjectName("MediaWorkspaceViewerFooter")
+        vf_row = QHBoxLayout(viewer_footer)
+        vf_row.setContentsMargins(0, 0, 0, 0)
+        vf_row.setSpacing(tokens.spacing.xs)
+        for text, status, name in (
+            ("1920\u00d71080", "neutral", "MediaWorkspaceFooterResolution"),
+            ("Rec.709", "neutral", "MediaWorkspaceFooterColorSpace"),
+            ("Proxy Off", "warning", "MediaWorkspaceFooterProxy"),
+            ("GPU Decode", "success", "MediaWorkspaceFooterGpu"),
+        ):
+            badge = StatusBadge(self._theme, text, status=status)
+            badge.setObjectName(name)
+            vf_row.addWidget(badge, 0)
+        vf_row.addStretch(1)
+        inner.addWidget(viewer_footer)
 
         card.set_content(content)
         layout.addWidget(card, 1)
