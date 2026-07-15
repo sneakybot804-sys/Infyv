@@ -46,6 +46,9 @@ from gui.widgets.timeline import Timeline
 from gui.widgets.toggle_switch import ToggleSwitch
 from gui.widgets.transport_bar import TransportBar
 
+# QScrollArea is imported lazily inside _build_details to keep the top-level
+# import block minimal; see the local import there.
+
 #: Static/demo media used to seed the browser (no filesystem access).
 _DEMO_ITEMS: List[str] = [
     "clip_01.mp4",
@@ -423,10 +426,140 @@ class _MediaWorkspace(QWidget):
         header = SectionHeader(self._theme, "Details", subtitle="Selected media")
         header.set_divider(True)
         inner.addWidget(header)
-        inner.addWidget(self._detail_name)
-        inner.addWidget(self._detail_kind)
-        inner.addWidget(self._detail_status)
-        inner.addStretch(1)
+
+        # --- Phase 10H: professional information dashboard (decorative) --- #
+        # A scrollable body of read-only metadata sections. The three frozen
+        # detail MetaLabels (self._detail_name / _detail_kind / _detail_status)
+        # remain the General section's rows, so selection wiring is unchanged.
+        from PySide6.QtWidgets import QScrollArea
+
+        body = QScrollArea(details)
+        body.setObjectName("MediaWorkspaceDetailsBody")
+        body.setWidgetResizable(True)
+        body.setFrameShape(QFrame.Shape.NoFrame)
+        body_container = QWidget()
+        body_container.setObjectName("MediaWorkspaceDetailsBodyContainer")
+        body_layout = QVBoxLayout(body_container)
+        body_layout.setContentsMargins(0, 0, 0, 0)
+        body_layout.setSpacing(tokens.spacing.md)
+
+        def _section(title: str, rows) -> None:
+            """Append a decorative metadata section (header + glass card).
+
+            ``rows`` is a sequence of either an existing MetaLabel widget (kept
+            as-is) or a (key, value) pair rendered as a new MetaLabel row.
+            """
+            sec_header = SectionHeader(self._theme, title)
+            sec_header.setObjectName("MediaWorkspaceDetailsSection")
+            sec_header.set_divider(True)
+            body_layout.addWidget(sec_header)
+
+            group = QFrame(body_container)
+            group.setObjectName("MediaWorkspaceDetailsGroup")
+            group.setFrameShape(QFrame.Shape.StyledPanel)
+            group_layout = QVBoxLayout(group)
+            group_layout.setContentsMargins(
+                tokens.spacing.md, tokens.spacing.sm,
+                tokens.spacing.md, tokens.spacing.sm,
+            )
+            group_layout.setSpacing(tokens.spacing.xxs)
+            for row in rows:
+                if isinstance(row, tuple):
+                    label = MetaLabel(
+                        self._theme,
+                        f"{row[0]}: {row[1]}",
+                        role="muted",
+                        style="body_small",
+                    )
+                    label.setObjectName("MediaWorkspaceDetailsRow")
+                    group_layout.addWidget(label)
+                else:
+                    group_layout.addWidget(row)
+            body_layout.addWidget(group)
+
+        # General reuses the frozen detail MetaLabels (unchanged identity).
+        _section(
+            "General",
+            (self._detail_name, self._detail_kind, self._detail_status,
+             ("Track", "\u2014")),
+        )
+        _section(
+            "File",
+            (("Size", "\u2014"), ("Created", "\u2014"), ("Modified", "\u2014")),
+        )
+        _section(
+            "Video",
+            (("Resolution", "1920\u00d71080"), ("FPS", "60"),
+             ("Codec", "H.264"), ("Bitrate", "\u2014"),
+             ("Frame Count", "\u2014")),
+        )
+        _section(
+            "Audio",
+            (("Channels", "Stereo"), ("Sample Rate", "48 kHz"),
+             ("Codec", "AAC")),
+        )
+        _section(
+            "Timeline",
+            (("Duration", "00:00:00"), ("In", "\u2014"), ("Out", "\u2014")),
+        )
+
+        # AI Analysis: status badges instead of plain rows.
+        ai_header = SectionHeader(self._theme, "AI Analysis")
+        ai_header.setObjectName("MediaWorkspaceDetailsSection")
+        ai_header.set_divider(True)
+        body_layout.addWidget(ai_header)
+        ai_group = QFrame(body_container)
+        ai_group.setObjectName("MediaWorkspaceDetailsGroup")
+        ai_group.setFrameShape(QFrame.Shape.StyledPanel)
+        ai_layout = QVBoxLayout(ai_group)
+        ai_layout.setContentsMargins(
+            tokens.spacing.md, tokens.spacing.sm,
+            tokens.spacing.md, tokens.spacing.sm,
+        )
+        ai_layout.setSpacing(tokens.spacing.xs)
+        for text, status in (
+            ("AI Status: Idle", "info"),
+            ("Scene Count: 0", "neutral"),
+            ("Highlight Count: 0", "neutral"),
+            ("OCR: Off", "warning"),
+            ("Audio Analysis: Off", "warning"),
+        ):
+            badge = StatusBadge(self._theme, text, status=status)
+            badge.setObjectName("MediaWorkspaceDetailsAiBadge")
+            ai_layout.addWidget(badge)
+        body_layout.addWidget(ai_group)
+
+        body_layout.addStretch(1)
+        body.setWidget(body_container)
+        inner.addWidget(body, 1)
+
+        # Object-name-scoped, token-derived dashboard styling.
+        c = tokens.colors
+        body.setStyleSheet(
+            f"#MediaWorkspaceDetailsBody {{ background: transparent; "
+            f"border: none; }} "
+            f"#MediaWorkspaceDetailsBodyContainer {{ background: transparent; }} "
+            f"QScrollBar:vertical {{ background: transparent; "
+            f"width: {tokens.spacing.sm}px; margin: 0px; }} "
+            f"QScrollBar::handle:vertical {{ background: {c.surface_overlay}; "
+            f"border-radius: {tokens.radius.sm}px; "
+            f"min-height: {tokens.spacing.xl}px; }} "
+            f"QScrollBar::handle:vertical:hover {{ background: {c.accent_cyan}; }} "
+            f"QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ "
+            f"height: 0px; }} "
+            f"QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ "
+            f"background: transparent; }}"
+        )
+        group_qss = (
+            f"#MediaWorkspaceDetailsGroup {{ background: {c.surface_overlay}; "
+            f"border: 1px solid {c.border}; "
+            f"border-radius: {tokens.radius.md}px; }} "
+            f"#MediaWorkspaceDetailsRow {{ background: transparent; }} "
+            f"#MediaWorkspaceDetailsAiBadge {{ background: transparent; }}"
+        )
+        for grp in body_container.findChildren(QFrame):
+            if grp.objectName() == "MediaWorkspaceDetailsGroup":
+                grp.setStyleSheet(group_qss)
 
         card.set_content(content)
         layout.addWidget(card, 1)
