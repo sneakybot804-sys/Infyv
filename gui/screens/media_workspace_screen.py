@@ -41,6 +41,7 @@ from gui.widgets.glass_card import GlassCard
 from gui.widgets.media_browser import MediaBrowser
 from gui.widgets.meta_label import MetaLabel
 from gui.widgets.navigation_sidebar import NavigationSidebar
+from PySide6.QtWidgets import QSizePolicy
 from gui.widgets.neon_button import NeonButton
 from gui.widgets.section_header import SectionHeader
 from gui.widgets.status_badge import StatusBadge
@@ -93,14 +94,13 @@ class _MediaWorkspace(QWidget):
             f"background: transparent; }}"
         )
 
+        # MediaBrowser: fully constructed with all frozen APIs and signals
+        # intact. Kept detached from the splitter in the Milestone 2 layout
+        # so its zero-size hidden slot cannot corrupt the sidebar's geometry.
+        # A future milestone re-parents it into the workspace when the Media
+        # nav item is activated. selection_changed wiring below is unchanged.
         self._browser = MediaBrowser(theme, items=list(_DEMO_ITEMS))
         self._browser.setMinimumWidth(240)
-        # Hidden in the Milestone 2 layout: the NavigationSidebar's "Media"
-        # nav item is the entry point for this milestone. MediaBrowser and all
-        # its frozen APIs/signals remain fully intact; it is only hidden so it
-        # does not render as a duplicate left column alongside the new rail.
-        # A future milestone will toggle its visibility from the nav item.
-        self._browser.hide()
         self._preview_header = SectionHeader(
             theme, "Preview", subtitle="No clip selected"
         )
@@ -144,23 +144,31 @@ class _MediaWorkspace(QWidget):
         right_column.setStretchFactor(1, 1)
         right_column.setSizes([320, 520])
 
-        # Top editing area: sidebar | large preview | right column.
+        # Top editing area: sidebar | preview | right column.
+        # The MediaBrowser is intentionally NOT added to this splitter in M2
+        # (see comment above); it remains a detached widget so its absence
+        # never creates an ambiguous zero-size slot that corrupts the sidebar.
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
         splitter.setObjectName("MediaWorkspaceSplitter")
         splitter.setChildrenCollapsible(False)
         splitter.setHandleWidth(handle_width)
+
         self._sidebar = NavigationSidebar(self._theme)
+        # Fixed horizontal / Expanding vertical: the sidebar never shrinks
+        # below its setFixedWidth(240) and always fills the vertical space.
+        self._sidebar.setSizePolicy(
+            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding
+        )
         splitter.addWidget(self._sidebar)
-        splitter.addWidget(self._browser)   # hidden; APIs/signals intact
         splitter.addWidget(self._build_preview())
         splitter.addWidget(right_column)
-        splitter.setStretchFactor(0, 0)  # navigation rail  (fixed 240px)
-        splitter.setStretchFactor(1, 0)  # media browser    (hidden, 0px)
-        splitter.setStretchFactor(2, 1)  # preview          (grows)
-        splitter.setStretchFactor(3, 0)  # right column     (fixed-ish)
-        # Browser is hidden so its slot collapses to 0; sidebar gets its full
-        # 240px and the preview takes the remaining horizontal space.
-        splitter.setSizes([240, 0, 940, 300])
+        splitter.setCollapsible(0, False)  # sidebar must never collapse
+        splitter.setCollapsible(1, False)  # preview must never collapse
+        splitter.setCollapsible(2, False)  # right column must never collapse
+        splitter.setStretchFactor(0, 0)    # sidebar: fixed width
+        splitter.setStretchFactor(1, 1)    # preview: takes all spare space
+        splitter.setStretchFactor(2, 0)    # right column: fixed-ish
+        splitter.setSizes([240, 940, 300])
 
         # Outer vertical split: the editing area over a generous, resizable
         # Timeline region (the timeline is a first-class region, not a strip).

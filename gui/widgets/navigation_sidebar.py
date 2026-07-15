@@ -153,8 +153,10 @@ class NavigationSidebar(ThemedWidget):
 
         tokens = self.tokens
         root = QVBoxLayout(self)
-        margin = self.scaled(tokens.spacing.lg)  # 16px outer padding
-        root.setContentsMargins(margin, margin, margin, margin)
+        # Pass four explicit integers so DPI rounding on a single scaled()
+        # call cannot produce asymmetric margins.
+        m = self.scaled(tokens.spacing.lg)  # 16px
+        root.setContentsMargins(m, m, m, m)
         root.setSpacing(self.scaled(tokens.spacing.xl))  # 24px between blocks
 
         # stretch=0 for nav and recent so they size to their natural heights;
@@ -168,6 +170,10 @@ class NavigationSidebar(ThemedWidget):
 
         self._update_nav_styles()
         self.apply_theme()
+        # Second explicit call: guarantees the active-item highlight survives
+        # any stylesheet cascade reset that apply_theme() may trigger on
+        # child widgets during the first paint cycle.
+        self._update_nav_styles()
 
     # ------------------------------------------------------------------ #
     # Region builders
