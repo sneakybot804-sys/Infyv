@@ -42,6 +42,7 @@ from gui.widgets.meta_label import MetaLabel
 from gui.widgets.neon_button import NeonButton
 from gui.widgets.section_header import SectionHeader
 from gui.widgets.status_badge import StatusBadge
+from gui.widgets.text_field import TextField
 from gui.widgets.timeline import Timeline
 from gui.widgets.toggle_switch import ToggleSwitch
 from gui.widgets.transport_bar import TransportBar
@@ -98,9 +99,11 @@ class _MediaWorkspace(QWidget):
         right_column.setHandleWidth(handle_width)
         right_column.addWidget(self._build_details())
         right_column.addWidget(self._build_inspector())
+        right_column.addWidget(self._build_ai_assistant())
         right_column.setStretchFactor(0, 0)
         right_column.setStretchFactor(1, 1)
-        right_column.setSizes([320, 520])
+        right_column.setStretchFactor(2, 0)
+        right_column.setSizes([300, 420, 340])
 
         # Top editing area: sidebar | large preview | right column.
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
@@ -592,6 +595,137 @@ class _MediaWorkspace(QWidget):
         self._clip_inspector = ClipInspector(self._theme)
         inner.addWidget(self._clip_inspector)
         inner.addStretch(1)
+
+        card.set_content(content)
+        layout.addWidget(card, 1)
+        return region
+
+    def _build_ai_assistant(self) -> QWidget:
+        """Build the right-side AI Assistant panel (UI-only placeholders).
+
+        A decorative professional AI copilot panel: header, prompt field,
+        suggested-action buttons, AI pipeline-status chips, recent tasks and
+        smart recommendations. Every control is wired to nothing (no backend,
+        no AI, no signals); new object names only.
+        """
+        tokens = self._theme.tokens
+        c = tokens.colors
+
+        region = QWidget()
+        region.setObjectName("MediaWorkspaceAiAssistant")
+        region.setMinimumWidth(260)
+        layout = QVBoxLayout(region)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(tokens.spacing.md)
+
+        card = GlassCard(self._theme, glow="purple", elevation="medium")
+        card.setObjectName("MediaWorkspaceAiAssistantCard")
+        content = QWidget()
+        inner = QVBoxLayout(content)
+        inner.setContentsMargins(
+            tokens.spacing.lg, tokens.spacing.lg, tokens.spacing.lg, tokens.spacing.lg
+        )
+        inner.setSpacing(tokens.spacing.sm)
+
+        header = SectionHeader(
+            self._theme, "AI Assistant", subtitle="Smart editing copilot"
+        )
+        header.setObjectName("MediaWorkspaceAiHeader")
+        header.set_badge("Beta", accent="purple")
+        header.set_divider(True)
+        inner.addWidget(header)
+
+        # Prompt input + Ask affordance (placeholders; wired to nothing).
+        self._ai_prompt = TextField(
+            self._theme, placeholder="Ask the AI to edit\u2026"
+        )
+        self._ai_prompt.setObjectName("MediaWorkspaceAiPrompt")
+        inner.addWidget(self._ai_prompt)
+        ask = NeonButton(self._theme, "Ask AI", variant="primary", accent="purple")
+        ask.setObjectName("MediaWorkspaceAiAsk")
+        inner.addWidget(ask)
+
+        # Suggested Actions grid of ghost buttons (decorative).
+        actions_header = SectionHeader(self._theme, "Suggested Actions")
+        actions_header.setObjectName("MediaWorkspaceAiSection")
+        inner.addWidget(actions_header)
+        actions_wrap = QWidget(content)
+        actions_wrap.setObjectName("MediaWorkspaceAiActions")
+        actions_grid = QVBoxLayout(actions_wrap)
+        actions_grid.setContentsMargins(0, 0, 0, 0)
+        actions_grid.setSpacing(tokens.spacing.xs)
+        action_labels = (
+            "Auto Edit", "Generate Highlights", "Generate Captions",
+            "Clean Audio", "Create Thumbnail", "Smart Crop",
+            "Remove Silence", "Enhance Voice", "Color Grade",
+        )
+        pair_row = None
+        for index, label in enumerate(action_labels):
+            if index % 2 == 0:
+                pair_row = QHBoxLayout()
+                pair_row.setContentsMargins(0, 0, 0, 0)
+                pair_row.setSpacing(tokens.spacing.xs)
+                actions_grid.addLayout(pair_row)
+            btn = NeonButton(self._theme, label, variant="ghost", accent="cyan")
+            btn.setObjectName("MediaWorkspaceAiAction")
+            pair_row.addWidget(btn)
+        inner.addWidget(actions_wrap)
+
+        # AI Pipeline Status chips (decorative).
+        status_header = SectionHeader(self._theme, "AI Pipeline Status")
+        status_header.setObjectName("MediaWorkspaceAiSection")
+        inner.addWidget(status_header)
+        status_wrap = QWidget(content)
+        status_wrap.setObjectName("MediaWorkspaceAiStatus")
+        status_row = QVBoxLayout(status_wrap)
+        status_row.setContentsMargins(0, 0, 0, 0)
+        status_row.setSpacing(tokens.spacing.xxs)
+        for text, status in (
+            ("Highlight Detection: Idle", "info"),
+            ("OCR: Idle", "neutral"),
+            ("Audio Analysis: Idle", "neutral"),
+            ("Subtitle Generator: Idle", "neutral"),
+            ("Export Assistant: Idle", "warning"),
+        ):
+            badge = StatusBadge(self._theme, text, status=status)
+            badge.setObjectName("MediaWorkspaceAiStatusBadge")
+            status_row.addWidget(badge)
+        inner.addWidget(status_wrap)
+
+        # Recent AI Tasks + Smart Recommendations (decorative label rows).
+        recent_header = SectionHeader(self._theme, "Recent AI Tasks")
+        recent_header.setObjectName("MediaWorkspaceAiSection")
+        inner.addWidget(recent_header)
+        for text in (
+            "\u2014 No tasks yet",
+            "Highlights will appear here",
+            "Captions will appear here",
+        ):
+            row = MetaLabel(self._theme, text, role="muted", style="body_small")
+            row.setObjectName("MediaWorkspaceAiRecent")
+            inner.addWidget(row)
+
+        rec_header = SectionHeader(self._theme, "Smart Recommendations")
+        rec_header.setObjectName("MediaWorkspaceAiSection")
+        inner.addWidget(rec_header)
+        for text in (
+            "Try Auto Edit for a quick cut",
+            "Generate captions for accessibility",
+            "Clean audio to reduce background noise",
+        ):
+            row = MetaLabel(self._theme, text, role="muted", style="caption")
+            row.setObjectName("MediaWorkspaceAiRecommendation")
+            inner.addWidget(row)
+
+        inner.addStretch(1)
+
+        # Object-name-scoped, token-derived styling (glass sub-panels).
+        for wrap in (actions_wrap, status_wrap):
+            wrap.setStyleSheet(
+                f"#{wrap.objectName()} {{ background: {c.surface_overlay}; "
+                f"border: 1px solid {c.border}; "
+                f"border-radius: {tokens.radius.md}px; }}"
+            )
 
         card.set_content(content)
         layout.addWidget(card, 1)
