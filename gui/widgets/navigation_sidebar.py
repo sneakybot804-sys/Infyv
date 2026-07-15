@@ -147,14 +147,22 @@ class NavigationSidebar(ThemedWidget):
         fixed_w = self.scaled(240)
         self.setFixedWidth(fixed_w)
 
+        # Required for QWidget subclasses: without this attribute Qt ignores
+        # background-color in QSS and the panel surface never paints.
+        self.setAttribute(Qt.WA_StyledBackground, True)
+
         tokens = self.tokens
         root = QVBoxLayout(self)
         margin = self.scaled(tokens.spacing.lg)  # 16px outer padding
         root.setContentsMargins(margin, margin, margin, margin)
         root.setSpacing(self.scaled(tokens.spacing.xl))  # 24px between blocks
 
+        # stretch=0 for nav and recent so they size to their natural heights;
+        # the expanding spacer between recent and system provides all the
+        # breathing room, keeping the footer pinned to the bottom.
         root.addWidget(self._build_nav(), 0)
-        root.addWidget(self._build_recent(), 1)
+        root.addWidget(self._build_recent(), 0)
+        root.addStretch(1)  # pushes system + AI card to the bottom
         root.addWidget(self._build_system(), 0)
         root.addWidget(self._build_ai_status(), 0)
 
@@ -173,8 +181,9 @@ class NavigationSidebar(ThemedWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(self.scaled(tokens.spacing.sm))  # 8px gap
 
-        row_h = self.scaled(36)  # explicit row height so QSS padding never
-        # collapses the geometry; 36px matches the blueprint spec.
+        row_h = self.scaled(38)  # explicit row height: taller click target
+        # and more visible background fill; geometry owned by Qt layout,
+        # not by QSS padding which cannot expand a QLabel.
         for index, label in enumerate(_NAV_ITEMS):
             item = QLabel(label, nav)
             item.setObjectName("NavigationItem")
@@ -209,8 +218,9 @@ class NavigationSidebar(ThemedWidget):
 
         for name, when in _RECENT_PROJECTS:
             rows_layout.addWidget(self._recent_row(name, when))
-        rows_layout.addStretch(1)
-        layout.addWidget(rows, 1)
+        # No addStretch here: the root layout's expanding spacer (inserted
+        # after this block) provides all the vertical breathing room.
+        layout.addWidget(rows)
         return wrap
 
     def _recent_row(self, name: str, when: str) -> QWidget:
@@ -439,15 +449,15 @@ class NavigationSidebar(ThemedWidget):
         radius = self.scaled(self.tokens.radius.md)  # 12px
         thumb_radius = self.scaled(self.tokens.radius.sm)  # 8px
         self.setStyleSheet(
-            # Deep semi-opaque surface so the rail reads as a solid premium
-            # panel rather than a transparent overlay. The border is a faint
-            # white edge that separates it from the workspace background.
-            f"#NavigationSidebar {{ "
-            f"background: rgba(18, 22, 33, 0.75); "
-            f"border: 1px solid rgba(255, 255, 255, 0.06); "
+            # QWidget#Name with background-color (not background shorthand)
+            # is required for the fill to paint; WA_StyledBackground must
+            # also be set (done in __init__) for this rule to take effect.
+            f"QWidget#NavigationSidebar {{ "
+            f"background-color: rgba(18, 22, 33, 0.85); "
+            f"border: 1px solid rgba(255, 255, 255, 0.08); "
             f"border-radius: {radius}px; }} "
             f"#NavigationSidebarNav {{ background: transparent; }} "
-            f"#NavigationRecentThumb {{ background: {c.surface_overlay}; "
+            f"#NavigationRecentThumb {{ background-color: {c.surface_overlay}; "
             f"border-radius: {thumb_radius}px; }} "
             f"#NavigationRecentName {{ color: {c.text_secondary}; "
             f"background: transparent; }} "
