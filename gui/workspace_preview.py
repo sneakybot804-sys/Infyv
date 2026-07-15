@@ -15,11 +15,20 @@ from __future__ import annotations
 
 import sys
 
+# Disable bytecode caching so stale .pyc files can never cause the running
+# code to diverge from the source on disk.
+sys.dont_write_bytecode = True
+
+#: Bump this token on every structural change. Printed to stdout on launch
+#: so you can confirm the new code is actually executing.
+_LAUNCHER_VERSION = "m2-toolbar-fix-v3"
+
 from gui.theme.dpi import configure_high_dpi
 
 
 def main() -> int:
     """Launch the media workspace screen and run the Qt event loop."""
+    print(f"[workspace_preview] version={_LAUNCHER_VERSION} -- new code is running")
     configure_high_dpi()
 
     from PySide6.QtWidgets import QApplication
