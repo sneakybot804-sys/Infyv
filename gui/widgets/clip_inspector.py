@@ -452,14 +452,6 @@ class ClipInspector(ThemedWidget):
         self._body_layout.addWidget(section)
         return section
 
-    def section_titles(self) -> List[str]:
-        """Return the professional property section titles (additive, read-only)."""
-        return [section.title() for section in self._sections]
-
-    def property_row_count(self) -> int:
-        """Return the total number of placeholder property rows (additive)."""
-        return sum(section.row_count() for section in self._sections)
-
     # ------------------------------------------------------------------ #
     # Public API
     # ------------------------------------------------------------------ #
