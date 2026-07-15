@@ -58,7 +58,8 @@ QToolTip {{
 
 /* ---- Buttons (base, neon-accented) ------------------------------------ */
 QPushButton {{
-    background-color: {to_qss(c.surface_elevated)};
+    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 {to_qss(c.surface_elevated)}, stop:1 {to_qss(c.surface)});
     color: {to_qss(c.text_primary)};
     border: 1px solid {to_qss(c.border)};
     border-radius: {r.md}px;
@@ -66,39 +67,108 @@ QPushButton {{
 }}
 
 QPushButton:hover {{
+    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 {to_qss(c.surface_overlay)}, stop:1 {to_qss(c.surface_elevated)});
     border: 1px solid {to_qss(c.accent_cyan)};
     color: {to_qss(c.text_primary)};
 }}
 
 QPushButton:pressed {{
     background-color: {to_qss(c.surface_overlay)};
+    border: 1px solid {to_qss(c.accent_cyan)};
 }}
 
 QPushButton:disabled {{
+    background-color: {to_qss(c.surface)};
     color: {to_qss(c.text_disabled)};
     border: 1px solid {to_qss(c.divider)};
 }}
 
 /* ---- Text inputs ------------------------------------------------------ */
 QLineEdit, QPlainTextEdit, QTextEdit {{
-    background-color: {to_qss(c.surface)};
+    background-color: {to_qss(c.background_deep)};
     color: {to_qss(c.text_primary)};
     border: 1px solid {to_qss(c.border)};
     border-radius: {r.md}px;
-    padding: {s.xs}px {s.sm}px;
+    padding: {s.sm}px {s.md}px;
     selection-background-color: {to_qss(c.accent_blue)};
     selection-color: {to_qss(c.text_on_accent)};
 }}
 
-QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus {{
-    border: 1px solid {to_qss(c.focus_ring)};
+QLineEdit:hover, QPlainTextEdit:hover, QTextEdit:hover {{
+    border: 1px solid {to_qss(c.glass_border)};
 }}
 
-/* ---- Scrollbars ------------------------------------------------------- */
+QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus {{
+    border: 1px solid {to_qss(c.focus_ring)};
+    background-color: {to_qss(c.surface)};
+}}
+
+/* ---- Combo boxes ------------------------------------------------------ */
+QComboBox {{
+    background-color: {to_qss(c.background_deep)};
+    color: {to_qss(c.text_primary)};
+    border: 1px solid {to_qss(c.border)};
+    border-radius: {r.md}px;
+    padding: {s.xs}px {s.md}px;
+}}
+
+QComboBox:hover {{
+    border: 1px solid {to_qss(c.accent_cyan)};
+}}
+
+QComboBox::drop-down {{
+    border: none;
+    width: {s.lg}px;
+}}
+
+QComboBox QAbstractItemView {{
+    background-color: {to_qss(c.surface_elevated)};
+    color: {to_qss(c.text_primary)};
+    border: 1px solid {to_qss(c.glass_border)};
+    border-radius: {r.md}px;
+    selection-background-color: {to_qss(c.surface_overlay)};
+    selection-color: {to_qss(c.accent_cyan)};
+    outline: none;
+    padding: {s.xxs}px;
+}}
+
+/* ---- Check boxes / radios --------------------------------------------- */
+QCheckBox, QRadioButton {{
+    background: transparent;
+    color: {to_qss(c.text_secondary)};
+    spacing: {s.sm}px;
+}}
+
+QCheckBox::indicator, QRadioButton::indicator {{
+    width: {s.md}px;
+    height: {s.md}px;
+    border: 1px solid {to_qss(c.border)};
+    background: {to_qss(c.background_deep)};
+}}
+
+QCheckBox::indicator {{
+    border-radius: {r.sm}px;
+}}
+
+QRadioButton::indicator {{
+    border-radius: {s.md}px;
+}}
+
+QCheckBox::indicator:hover, QRadioButton::indicator:hover {{
+    border: 1px solid {to_qss(c.accent_cyan)};
+}}
+
+QCheckBox::indicator:checked, QRadioButton::indicator:checked {{
+    background: {to_qss(c.accent_cyan)};
+    border: 1px solid {to_qss(c.accent_cyan)};
+}}
+
+/* ---- Scrollbars (thin overlay) ---------------------------------------- */
 QScrollBar:vertical {{
     background: transparent;
-    width: {s.sm}px;
-    margin: 0px;
+    width: {s.xs}px;
+    margin: {s.xxs}px;
 }}
 
 QScrollBar::handle:vertical {{
@@ -107,24 +177,16 @@ QScrollBar::handle:vertical {{
     min-height: {s.xl}px;
 }}
 
-QScrollBar::handle:vertical:hover {{
-    background: {to_qss(c.accent_purple)};
-}}
-
 QScrollBar:horizontal {{
     background: transparent;
-    height: {s.sm}px;
-    margin: 0px;
+    height: {s.xs}px;
+    margin: {s.xxs}px;
 }}
 
 QScrollBar::handle:horizontal {{
     background: {to_qss(c.surface_overlay)};
     border-radius: {r.sm}px;
     min-width: {s.xl}px;
-}}
-
-QScrollBar::handle:horizontal:hover {{
-    background: {to_qss(c.accent_purple)};
 }}
 
 QScrollBar::add-line, QScrollBar::sub-line {{
@@ -138,6 +200,48 @@ QScrollBar::add-page, QScrollBar::sub-page {{
 
 QScrollBar::handle:vertical:hover, QScrollBar::handle:horizontal:hover {{
     background: {to_qss(c.accent_cyan)};
+}}
+
+/* ---- Group boxes (section grouping) ----------------------------------- */
+QGroupBox {{
+    background-color: {to_qss(c.surface)};
+    border: 1px solid {to_qss(c.border)};
+    border-radius: {r.lg}px;
+    margin-top: {s.md}px;
+    padding: {s.md}px;
+}}
+
+QGroupBox::title {{
+    subcontrol-origin: margin;
+    left: {s.md}px;
+    padding: 0px {s.xs}px;
+    color: {to_qss(c.text_secondary)};
+}}
+
+/* ---- Tabs ------------------------------------------------------------- */
+QTabWidget::pane {{
+    border: none;
+    top: -1px;
+}}
+
+QTabBar::tab {{
+    background: {to_qss(c.surface)};
+    color: {to_qss(c.text_muted)};
+    border: 1px solid {to_qss(c.border)};
+    border-top-left-radius: {r.sm}px;
+    border-top-right-radius: {r.sm}px;
+    padding: {s.xs}px {s.md}px;
+    margin-right: {s.xxs}px;
+}}
+
+QTabBar::tab:hover {{
+    color: {to_qss(c.text_secondary)};
+}}
+
+QTabBar::tab:selected {{
+    background: {to_qss(c.surface_elevated)};
+    color: {to_qss(c.accent_cyan)};
+    border: 1px solid {to_qss(c.accent_cyan)};
 }}
 
 /* ---- Menu bar / menus (premium glass) --------------------------------- */
