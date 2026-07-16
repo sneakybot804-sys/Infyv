@@ -740,36 +740,65 @@ class _MediaWorkspace(QWidget):
             card = QFrame()
             card.setObjectName("MediaWorkspaceAiToolCard")
             card.setFrameShape(QFrame.Shape.StyledPanel)
-            card.setMinimumHeight(46)
+            # Minimum (not fixed) height with a Minimum vertical policy: the
+            # card can grow taller when the wrapped description needs a second
+            # line, so rows never collide. The floor keeps single-line cards
+            # visually uniform.
+            card.setMinimumHeight(64)
             card.setSizePolicy(
-                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
             )
             card.setStyleSheet(card_qss)
             card_layout = QVBoxLayout(card)
-            card_layout.setContentsMargins(s.sm, s.xs, s.sm, s.xs)
-            card_layout.setSpacing(0)
+            card_layout.setContentsMargins(s.sm, s.sm, s.sm, s.sm)
+            # Real vertical breathing room between the title row and the
+            # description so the two never bleed into each other.
+            card_layout.setSpacing(s.xs)
 
+            # Title row: title takes the flexible space, a stretch separates
+            # it from the AI badge, and the badge is pinned hard to the right
+            # margin so it can never encroach on the title's display area.
             title_row = QHBoxLayout()
             title_row.setContentsMargins(0, 0, 0, 0)
-            title_row.setSpacing(s.xs)
+            title_row.setSpacing(s.sm)
             title_lbl = MetaLabel(
                 self._theme, title, role="primary", style="body_small"
             )
             title_lbl.setObjectName("MediaWorkspaceAiToolTitle")
-            title_row.addWidget(title_lbl, 0)
+            title_lbl.setSizePolicy(
+                QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred
+            )
+            title_row.addWidget(title_lbl, 1)
+            title_row.addStretch(1)
             badge = StatusBadge(self._theme, "AI", status="info")
             badge.setObjectName("MediaWorkspaceAiToolBadge")
-            title_row.addWidget(badge, 0)
-            title_row.addStretch(1)
+            # Badge hugs its own size hint so it stays a compact chip on the
+            # right edge and never stretches across the title.
+            badge.setSizePolicy(
+                QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
+            )
+            title_row.addWidget(
+                badge,
+                0,
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+            )
             card_layout.addLayout(title_row)
 
             desc_lbl = MetaLabel(
                 self._theme, desc, role="muted", style="caption"
             )
             desc_lbl.setObjectName("MediaWorkspaceAiToolDesc")
+            # Let the description wrap freely and claim the height it needs.
+            desc_lbl.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
+            )
             card_layout.addWidget(desc_lbl)
 
-            ai_grid.addWidget(card, idx // 2, idx % 2)
+            # Top-align each cell so an uneven (two-line) card in one column
+            # does not vertically stretch its single-line neighbour.
+            ai_grid.addWidget(
+                card, idx // 2, idx % 2, Qt.AlignmentFlag.AlignTop
+            )
         ai_grid.setColumnStretch(0, 1)
         ai_grid.setColumnStretch(1, 1)
         stream.addLayout(ai_grid)
