@@ -715,7 +715,8 @@ class _MediaWorkspace(QWidget):
         from PySide6.QtWidgets import QGridLayout
 
         ai_grid = QGridLayout()
-        ai_grid.setSpacing(s.sm)
+        ai_grid.setHorizontalSpacing(s.sm)
+        ai_grid.setVerticalSpacing(s.sm)
         ai_grid.setContentsMargins(0, 0, 0, 0)
         ai_tools = (
             ("Auto Edit", "Create edit automatically"),
@@ -736,6 +737,17 @@ class _MediaWorkspace(QWidget):
             f"border: 1px solid {c.accent_purple}; "
             f"background: {c.surface_elevated}; }}"
         )
+        # Compact, ultra-tight "AI" chip styling (token-derived). Scoped to
+        # this screen so the frozen StatusBadge widget is untouched; using a
+        # MetaLabel keeps padding minimal so the chip never hogs the row.
+        chip_qss = (
+            f"#MediaWorkspaceAiToolBadge {{ "
+            f"color: {c.accent_cyan}; "
+            f"background: {c.surface_overlay}; "
+            f"border: 1px solid {c.border}; "
+            f"border-radius: {r.sm}px; "
+            f"padding: 0px {s.xxs}px; }}"
+        )
         for idx, (title, desc) in enumerate(ai_tools):
             card = QFrame()
             card.setObjectName("MediaWorkspaceAiToolCard")
@@ -755,24 +767,32 @@ class _MediaWorkspace(QWidget):
             # description so the two never bleed into each other.
             card_layout.setSpacing(s.xs)
 
-            # Title row: title takes the flexible space, a stretch separates
-            # it from the AI badge, and the badge is pinned hard to the right
-            # margin so it can never encroach on the title's display area.
+            # Title row: title takes the flexible space and is kept on ONE
+            # row (no wrap); a stretch separates it from the compact AI chip,
+            # which is pinned hard to the right margin so it can never
+            # encroach on the title's display area or force it to wrap.
             title_row = QHBoxLayout()
             title_row.setContentsMargins(0, 0, 0, 0)
-            title_row.setSpacing(s.sm)
-            title_lbl = MetaLabel(
-                self._theme, title, role="primary", style="body_small"
-            )
+            title_row.setSpacing(s.xs)
+            title_lbl = QLabel(title, card)
             title_lbl.setObjectName("MediaWorkspaceAiToolTitle")
+            title_lbl.setFont(self._theme.font("caption"))
+            title_lbl.setWordWrap(False)
+            title_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+            title_lbl.setStyleSheet(
+                f"#MediaWorkspaceAiToolTitle {{ color: {c.text_primary}; "
+                f"background: transparent; }}"
+            )
             title_lbl.setSizePolicy(
-                QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred
+                QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
             )
             title_row.addWidget(title_lbl, 1)
-            title_row.addStretch(1)
-            badge = StatusBadge(self._theme, "AI", status="info")
+            title_row.addStretch(0)
+            badge = QLabel("AI", card)
             badge.setObjectName("MediaWorkspaceAiToolBadge")
-            # Badge hugs its own size hint so it stays a compact chip on the
+            badge.setFont(self._theme.font("caption"))
+            badge.setStyleSheet(chip_qss)
+            # Chip hugs its own size hint so it stays a compact element on the
             # right edge and never stretches across the title.
             badge.setSizePolicy(
                 QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
