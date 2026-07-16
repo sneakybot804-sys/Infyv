@@ -122,13 +122,18 @@ class _MediaWorkspace(QWidget):
         # (_detail_name/_kind/_status) and the ClipInspector / AI panels are
         # still constructed here so every existing signal handler
         # (_on_selection_changed, _on_clip_selected/_moved/_trimmed) keeps a
-        # live target. The Details panel is built and kept as a hidden host
-        # for those labels; the interactive stream is what the user sees.
+        # live target. The Details / Inspector / AI panels are built and
+        # parented to this screen but hidden, so their child widgets (notably
+        # self._clip_inspector) stay alive and connected without appearing in
+        # the visible stream.
         self._details_host = self._build_details()
+        self._details_host.setParent(self)
         self._details_host.setVisible(False)
         self._inspector_host = self._build_inspector()
+        self._inspector_host.setParent(self)
         self._inspector_host.setVisible(False)
         self._ai_host = self._build_ai_assistant()
+        self._ai_host.setParent(self)
         self._ai_host.setVisible(False)
 
         right_column = self._build_right_stream()
