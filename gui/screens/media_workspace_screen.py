@@ -831,14 +831,20 @@ class _MediaWorkspace(QWidget):
         stream.addWidget(props_header)
 
         transform_acc = self._build_stream_accordion("Transform")
-        # Dual right-aligned numeric entry fields (X / Y) matching the
-        # reference property editor, replacing the previous linear sliders.
-        transform_acc.add_dual_row("Scale", "100.0%", "100.0%")
-        transform_acc.add_dual_row("Position", "0.0", "0.0")
+        # X / Y coordinate rows with axis-prefixed numeric fields; Scale
+        # exposes a proportional-lock "Link" affordance matching the mock.
+        transform_acc.add_axis_row("Scale", "100.0%", "100.0%", linked=True)
+        transform_acc.add_axis_row("Position", "0.0", "0.0")
         stream.addWidget(transform_acc)
 
         audio_acc = self._build_stream_accordion("Audio")
-        audio_acc.add_dual_row("Volume", "100.0%", "100.0%")
+        # Single horizontal slider + one matching numeric field (not a dual
+        # input) so Audio reads as a level control, per the reference.
+        audio_acc.add_slider_row(
+            "Volume",
+            Slider(self._theme, minimum=0.0, maximum=200.0, value=100.0, accent="blue"),
+            "100%",
+        )
         stream.addWidget(audio_acc)
 
         # ---- Section 3: Background Tasks monitor ---- #
@@ -1258,6 +1264,76 @@ class _StreamAccordion(QWidget):
                 QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
             )
             row_layout.addWidget(field, 0, Qt.AlignmentFlag.AlignRight)
+        self._content_layout.addWidget(row)
+
+    def add_axis_row(
+        self,
+        label: str,
+        value_x: str,
+        value_y: str,
+        *,
+        linked: bool = False,
+    ) -> None:
+        """Append an X / Y coordinate row with axis-prefixed numeric fields.
+
+        Each field is prefixed with a small ``X`` / ``Y`` axis label, matching
+        the reference Transform editor. When ``linked`` is True a token-bound,
+        wired-to-nothing "Link" toggle (ghost NeonButton) is appended to
+        indicate the axes are proportionally locked. UI-only / decorative.
+        """
+        s = self._theme.tokens.spacing
+        row = QWidget(self._content)
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(s.sm)
+        name = MetaLabel(self._theme, label, role="muted", style="body_small")
+        row_layout.addWidget(name, 0)
+        row_layout.addStretch(1)
+        for axis, value in (("X", value_x), ("Y", value_y)):
+            axis_lbl = MetaLabel(
+                self._theme, axis, role="disabled", style="caption"
+            )
+            row_layout.addWidget(axis_lbl, 0, Qt.AlignmentFlag.AlignVCenter)
+            field = TextField(self._theme, text=value)
+            field.setObjectName("MediaWorkspaceStreamAxisField")
+            field.setMaximumWidth(60)
+            field.setSizePolicy(
+                QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
+            )
+            row_layout.addWidget(field, 0, Qt.AlignmentFlag.AlignRight)
+        if linked:
+            link = NeonButton(
+                self._theme, "Link", variant="ghost", accent="cyan"
+            )
+            link.setObjectName("MediaWorkspaceStreamAxisLink")
+            row_layout.addWidget(link, 0, Qt.AlignmentFlag.AlignRight)
+        self._content_layout.addWidget(row)
+
+    def add_slider_row(
+        self, label: str, control: QWidget, value: str
+    ) -> None:
+        """Append a row with a label, an expanding slider and one value field.
+
+        Used for Audio (Volume): a single horizontal :class:`Slider` that
+        absorbs the row width plus one compact, right-aligned value field.
+        UI-only / decorative.
+        """
+        s = self._theme.tokens.spacing
+        row = QWidget(self._content)
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(s.sm)
+        name = MetaLabel(self._theme, label, role="muted", style="body_small")
+        row_layout.addWidget(name, 0)
+        control.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
+        row_layout.addWidget(control, 1)
+        field = TextField(self._theme, text=value)
+        field.setObjectName("MediaWorkspaceStreamNumericField")
+        field.setMaximumWidth(64)
+        field.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        row_layout.addWidget(field, 0, Qt.AlignmentFlag.AlignRight)
         self._content_layout.addWidget(row)
 
     def _on_toggle(self) -> None:
