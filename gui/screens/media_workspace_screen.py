@@ -830,21 +830,14 @@ class _MediaWorkspace(QWidget):
         stream.addWidget(props_header)
 
         transform_acc = self._build_stream_accordion("Transform")
-        transform_acc.add_row(
-            "Scale",
-            Slider(self._theme, minimum=0.0, maximum=400.0, value=100.0, accent="cyan"),
-        )
-        transform_acc.add_row(
-            "Position",
-            Slider(self._theme, minimum=-100.0, maximum=100.0, value=0.0, accent="blue"),
-        )
+        # Dual right-aligned numeric entry fields (X / Y) matching the
+        # reference property editor, replacing the previous linear sliders.
+        transform_acc.add_dual_row("Scale", "100.0%", "100.0%")
+        transform_acc.add_dual_row("Position", "0.0", "0.0")
         stream.addWidget(transform_acc)
 
         audio_acc = self._build_stream_accordion("Audio")
-        audio_acc.add_row(
-            "Volume",
-            Slider(self._theme, minimum=0.0, maximum=200.0, value=100.0, accent="blue"),
-        )
+        audio_acc.add_dual_row("Volume", "100.0%", "100.0%")
         stream.addWidget(audio_acc)
 
         # ---- Section 3: Background Tasks monitor ---- #
@@ -1236,6 +1229,34 @@ class _StreamAccordion(QWidget):
         row_layout.addWidget(name, 0)
         row_layout.addStretch(1)
         row_layout.addWidget(control, 1)
+        self._content_layout.addWidget(row)
+
+    def add_dual_row(
+        self, label: str, value_x: str, value_y: str
+    ) -> None:
+        """Append a row with two right-aligned numeric input fields (X / Y).
+
+        Matches the reference property-editor layout: a left-hand label with
+        two compact, right-aligned :class:`TextField`s (e.g. Scale ->
+        ``100.0%`` / ``100.0%``, Position -> ``0.0`` / ``0.0``). UI-only:
+        the fields are decorative and wired to nothing.
+        """
+        s = self._theme.tokens.spacing
+        row = QWidget(self._content)
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(s.sm)
+        name = MetaLabel(self._theme, label, role="muted", style="body_small")
+        row_layout.addWidget(name, 0)
+        row_layout.addStretch(1)
+        for value in (value_x, value_y):
+            field = TextField(self._theme, text=value)
+            field.setObjectName("MediaWorkspaceStreamNumericField")
+            field.setMaximumWidth(72)
+            field.setSizePolicy(
+                QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
+            )
+            row_layout.addWidget(field, 0, Qt.AlignmentFlag.AlignRight)
         self._content_layout.addWidget(row)
 
     def _on_toggle(self) -> None:
