@@ -41,9 +41,11 @@ from gui.widgets.glass_card import GlassCard
 from gui.widgets.media_browser import MediaBrowser
 from gui.widgets.meta_label import MetaLabel
 from gui.widgets.navigation_sidebar import NavigationSidebar
-from PySide6.QtWidgets import QSizePolicy
+from PySide6.QtWidgets import QScrollArea, QSizePolicy
 from gui.widgets.neon_button import NeonButton
+from gui.widgets.progress_bar import ProgressBar
 from gui.widgets.section_header import SectionHeader
+from gui.widgets.slider import Slider
 from gui.widgets.status_badge import StatusBadge
 from gui.widgets.text_field import TextField
 from gui.widgets.timeline import Timeline
@@ -110,64 +112,30 @@ class _MediaWorkspace(QWidget):
 
         handle_width = tokens.spacing.xs
 
-        # Right column: Details stacked over the Clip Inspector, like a pro
-        # editor's metadata-over-inspector column (vertical split).
-        right_column = QSplitter(Qt.Orientation.Vertical)
-        right_column.setObjectName("MediaWorkspaceRightSplitter")
-        right_column.setChildrenCollapsible(False)
-        right_column.setHandleWidth(handle_width)
+        # Right column (unified stream): a single, seamless top-to-bottom
+        # scroll region replacing the previous Details-over-(Inspector/AI
+        # tabs) splitter. The nested layers were crushing vertical space and
+        # clipping against the timeline bounds; a single master QScrollArea
+        # gives one uniform stream instead.
+        #
+        # IMPORTANT (wiring preservation): the frozen Details labels
+        # (_detail_name/_kind/_status) and the ClipInspector / AI panels are
+        # still constructed here so every existing signal handler
+        # (_on_selection_changed, _on_clip_selected/_moved/_trimmed) keeps a
+        # live target. The Details panel is built and kept as a hidden host
+        # for those labels; the interactive stream is what the user sees.
+        self._details_host = self._build_details()
+        self._details_host.setVisible(False)
+        self._inspector_host = self._build_inspector()
+        self._inspector_host.setVisible(False)
+        self._ai_host = self._build_ai_assistant()
+        self._ai_host.setVisible(False)
+
+        right_column = self._build_right_stream()
+        right_column.setObjectName("MediaWorkspaceRightColumn")
         # Hard width cap: prevents the right column from absorbing surplus
         # horizontal space when the window is maximised on a wide monitor.
-        # setSizes() is a one-time hint; only setFixedWidth is a true
-        # constraint that survives a window resize / maximise event.
         right_column.setFixedWidth(300)
-        # The lower pane tabs the Clip Inspector together with the AI
-        # Assistant so the AI panel reuses the existing right-column space
-        # without shrinking the Details or Inspector panels.
-        right_tabs = QTabWidget()
-        right_tabs.setObjectName("MediaWorkspaceRightTabs")
-        right_tabs.addTab(self._build_inspector(), "Inspector")
-        right_tabs.addTab(self._build_ai_assistant(), "AI")
-        _tc = tokens.colors
-        _tr = tokens.radius
-        _ts = tokens.spacing
-        right_tabs.setStyleSheet(
-            # Pane: standard border on three sides; top edge is suppressed so
-            # the active tab's bottom accent line sits flush against the pane.
-            f"#MediaWorkspaceRightTabs::pane {{ "
-            f"border: 1px solid {_tc.border}; "
-            f"border-top: none; "
-            f"border-bottom-left-radius: {_tr.sm}px; "
-            f"border-bottom-right-radius: {_tr.sm}px; }} "
-            # Inactive tab: flat surface, muted text, standard border,
-            # no bottom border so it merges with the pane below.
-            f"#MediaWorkspaceRightTabs QTabBar::tab {{ "
-            f"background: {_tc.surface}; "
-            f"color: {_tc.text_muted}; "
-            f"border: 1px solid {_tc.border}; "
-            f"border-bottom: none; "
-            f"border-top-left-radius: {_tr.sm}px; "
-            f"border-top-right-radius: {_tr.sm}px; "
-            f"padding: {_ts.sm}px {_ts.lg}px; "
-            f"margin-right: {_ts.xxs}px; }} "
-            # Hover: subtle surface lift + secondary text.
-            f"#MediaWorkspaceRightTabs QTabBar::tab:hover {{ "
-            f"background: {_tc.surface_overlay}; "
-            f"color: {_tc.text_secondary}; }} "
-            # Active: elevated surface, cyan text, 2px cyan bottom glow line
-            # matching the nav sidebar active-item accent pattern.
-            f"#MediaWorkspaceRightTabs QTabBar::tab:selected {{ "
-            f"background: {_tc.surface_elevated}; "
-            f"color: {_tc.accent_cyan}; "
-            f"border: 1px solid {_tc.border}; "
-            f"border-bottom: 2px solid {_tc.accent_cyan}; }}"
-        )
-
-        right_column.addWidget(self._build_details())
-        right_column.addWidget(right_tabs)
-        right_column.setStretchFactor(0, 0)
-        right_column.setStretchFactor(1, 1)
-        right_column.setSizes([320, 520])
 
         # Top editing area: sidebar | preview | right column.
         # The MediaBrowser is intentionally NOT added to this splitter in M2
@@ -671,6 +639,225 @@ class _MediaWorkspace(QWidget):
         layout.addWidget(card, 1)
         return details
 
+    def _build_right_stream(self) -> QWidget:
+        """Build the unified single-scroll right column (UI-only stream).
+
+        A master :class:`QScrollArea` hosts one vertical stream: an AI
+        Assistant header with an inline Export action, a two-column grid of AI
+        tool cards, collapsible Properties accordions (Transform / Audio) and
+        a Background Tasks monitor. Every control is decorative and wired to
+        nothing; all visual values derive from theme tokens. This replaces the
+        old nested Details/Inspector/AI splitter in the visible view path
+        while the frozen detail labels + inspector remain live off-screen for
+        the existing selection wiring.
+        """
+        tokens = self._theme.tokens
+        c = tokens.colors
+        r = tokens.radius
+        s = tokens.spacing
+
+        master_scroll = QScrollArea()
+        master_scroll.setObjectName("MediaWorkspaceRightStream")
+        master_scroll.setWidgetResizable(True)
+        master_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        master_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        master_scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        master_scroll.setStyleSheet(
+            f"#MediaWorkspaceRightStream {{ background: transparent; "
+            f"border: none; }} "
+            f"QScrollBar:vertical {{ background: transparent; "
+            f"width: {s.sm}px; margin: 0px; }} "
+            f"QScrollBar::handle:vertical {{ background: {c.surface_overlay}; "
+            f"border-radius: {r.sm}px; min-height: {s.xl}px; }} "
+            f"QScrollBar::handle:vertical:hover {{ background: {c.accent_blue}; }} "
+            f"QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ "
+            f"height: 0px; border: none; background: none; }} "
+            f"QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ "
+            f"background: transparent; }}"
+        )
+
+        content = QWidget()
+        content.setObjectName("UnifiedRightSidebarContent")
+        content.setStyleSheet(
+            f"#UnifiedRightSidebarContent {{ background: transparent; }}"
+        )
+        stream = QVBoxLayout(content)
+        stream.setContentsMargins(s.sm, s.md, s.sm, s.md)
+        stream.setSpacing(s.lg)
+
+        # ---- Header: title + inline Export action ---- #
+        header_row = QHBoxLayout()
+        header_row.setContentsMargins(0, 0, 0, 0)
+        header_row.setSpacing(s.sm)
+        header_title = MetaLabel(
+            self._theme, "AI ASSISTANT", role="muted", style="caption"
+        )
+        header_title.setObjectName("MediaWorkspaceRightStreamHeader")
+        header_row.addWidget(header_title, 0)
+        header_row.addStretch(1)
+        export_btn = NeonButton(
+            self._theme, "Export", variant="primary", accent="blue"
+        )
+        export_btn.setObjectName("MediaWorkspaceRightStreamExport")
+        header_row.addWidget(export_btn, 0)
+        stream.addLayout(header_row)
+
+        # ---- Section 1: two-column AI tool card grid ---- #
+        from PySide6.QtWidgets import QGridLayout
+
+        ai_grid = QGridLayout()
+        ai_grid.setSpacing(s.sm)
+        ai_grid.setContentsMargins(0, 0, 0, 0)
+        ai_tools = (
+            ("Auto Edit", "Create edit automatically"),
+            ("Highlight Detection", "Find best moments"),
+            ("Funny Moment", "Detect funny moments"),
+            ("Beat Sync", "Sync to music beat"),
+            ("Subtitle Generator", "Auto generate subtitles"),
+            ("Thumbnail Generator", "Create thumbnails"),
+            ("Script Assistant", "Generate video scripts"),
+            ("Voice Cleanup", "Enhance voice quality"),
+        )
+        card_qss = (
+            f"QFrame#MediaWorkspaceAiToolCard {{ "
+            f"background: {c.surface}; "
+            f"border: 1px solid {c.border}; "
+            f"border-radius: {r.md}px; }} "
+            f"QFrame#MediaWorkspaceAiToolCard:hover {{ "
+            f"border: 1px solid {c.accent_purple}; "
+            f"background: {c.surface_elevated}; }}"
+        )
+        for idx, (title, desc) in enumerate(ai_tools):
+            card = QFrame()
+            card.setObjectName("MediaWorkspaceAiToolCard")
+            card.setFrameShape(QFrame.Shape.StyledPanel)
+            card.setMinimumHeight(46)
+            card.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+            )
+            card.setStyleSheet(card_qss)
+            card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(s.sm, s.xs, s.sm, s.xs)
+            card_layout.setSpacing(0)
+
+            title_row = QHBoxLayout()
+            title_row.setContentsMargins(0, 0, 0, 0)
+            title_row.setSpacing(s.xs)
+            title_lbl = MetaLabel(
+                self._theme, title, role="primary", style="body_small"
+            )
+            title_lbl.setObjectName("MediaWorkspaceAiToolTitle")
+            title_row.addWidget(title_lbl, 0)
+            badge = StatusBadge(self._theme, "AI", status="info")
+            badge.setObjectName("MediaWorkspaceAiToolBadge")
+            title_row.addWidget(badge, 0)
+            title_row.addStretch(1)
+            card_layout.addLayout(title_row)
+
+            desc_lbl = MetaLabel(
+                self._theme, desc, role="muted", style="caption"
+            )
+            desc_lbl.setObjectName("MediaWorkspaceAiToolDesc")
+            card_layout.addWidget(desc_lbl)
+
+            ai_grid.addWidget(card, idx // 2, idx % 2)
+        ai_grid.setColumnStretch(0, 1)
+        ai_grid.setColumnStretch(1, 1)
+        stream.addLayout(ai_grid)
+
+        # ---- Section 2: collapsible Properties accordions ---- #
+        props_header = SectionHeader(self._theme, "Properties")
+        props_header.setObjectName("MediaWorkspaceRightStreamSection")
+        props_header.set_divider(True)
+        stream.addWidget(props_header)
+
+        transform_acc = self._build_stream_accordion("Transform")
+        transform_acc.add_row(
+            "Scale",
+            Slider(self._theme, minimum=0.0, maximum=400.0, value=100.0, accent="cyan"),
+        )
+        transform_acc.add_row(
+            "Position",
+            Slider(self._theme, minimum=-100.0, maximum=100.0, value=0.0, accent="blue"),
+        )
+        stream.addWidget(transform_acc)
+
+        audio_acc = self._build_stream_accordion("Audio")
+        audio_acc.add_row(
+            "Volume",
+            Slider(self._theme, minimum=0.0, maximum=200.0, value=100.0, accent="blue"),
+        )
+        stream.addWidget(audio_acc)
+
+        # ---- Section 3: Background Tasks monitor ---- #
+        tasks_header = SectionHeader(self._theme, "Background Tasks")
+        tasks_header.setObjectName("MediaWorkspaceRightStreamSection")
+        tasks_header.set_divider(True)
+        stream.addWidget(tasks_header)
+
+        stream.addWidget(
+            self._build_stream_task(
+                "AI Analyzing", "Analyzing audio & video\u2026", 0.78, "cyan"
+            )
+        )
+        stream.addWidget(
+            self._build_stream_task(
+                "Generating Thumbnails", "Creating thumbnails\u2026", 0.65, "purple"
+            )
+        )
+
+        stream.addStretch(1)
+        master_scroll.setWidget(content)
+        return master_scroll
+
+    def _build_stream_accordion(self, title: str) -> "_StreamAccordion":
+        """Return a themed collapsible accordion frame for the right stream."""
+        return _StreamAccordion(self._theme, title)
+
+    def _build_stream_task(
+        self, title: str, subtitle: str, fraction: float, accent: str
+    ) -> QWidget:
+        """Build one Background Tasks monitor row (label + ProgressBar).
+
+        UI-only and decorative; ``fraction`` is a static 0..1 progress value
+        and ``accent`` selects the ProgressBar accent. No backend is involved.
+        """
+        tokens = self._theme.tokens
+        s = tokens.spacing
+
+        row = QWidget()
+        row.setObjectName("MediaWorkspaceBackgroundTask")
+        row.setStyleSheet(
+            f"#MediaWorkspaceBackgroundTask {{ background: transparent; }}"
+        )
+        layout = QVBoxLayout(row)
+        layout.setContentsMargins(0, s.xxs, 0, s.xxs)
+        layout.setSpacing(s.xxs)
+
+        top = QHBoxLayout()
+        top.setContentsMargins(0, 0, 0, 0)
+        top.setSpacing(s.sm)
+        title_lbl = MetaLabel(
+            self._theme, title, role="primary", style="body_small"
+        )
+        top.addWidget(title_lbl, 0)
+        top.addStretch(1)
+        pct_lbl = MetaLabel(
+            self._theme, f"{int(round(fraction * 100))}%", role="muted", style="caption"
+        )
+        top.addWidget(pct_lbl, 0)
+        layout.addLayout(top)
+
+        sub_lbl = MetaLabel(self._theme, subtitle, role="muted", style="caption")
+        layout.addWidget(sub_lbl)
+
+        layout.addWidget(ProgressBar(self._theme, value=fraction, accent=accent))
+        return row
+
     def _build_inspector(self) -> QWidget:
         """Build the right ClipInspector region (UI-only, read-only).
 
@@ -935,6 +1122,76 @@ class _MediaWorkspace(QWidget):
         duration = self._timeline.duration()
         fraction = seconds / duration if duration > 0 else 0.0
         self._transport.set_position(fraction)
+
+
+class _StreamAccordion(QWidget):
+    """A minimal collapsible section for the unified right stream (UI-only).
+
+    Composes a header row (chevron + title) with a token-styled content frame
+    that holds labeled control rows. The chevron toggles the local visibility
+    of the content frame only; it is wired to no logic and touches no backend.
+    """
+
+    _CHEVRON_EXPANDED = "\u25be"
+    _CHEVRON_COLLAPSED = "\u25b8"
+
+    def __init__(self, theme: ThemeManager, title: str) -> None:
+        super().__init__()
+        self._theme = theme
+        self._expanded = True
+        tokens = theme.tokens
+        c = tokens.colors
+        r = tokens.radius
+        s = tokens.spacing
+
+        self.setObjectName("MediaWorkspaceStreamAccordion")
+        column = QVBoxLayout(self)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(s.xxs)
+
+        self._toggle = NeonButton(
+            theme, f"{self._CHEVRON_EXPANDED}  {title}", variant="ghost", accent="cyan"
+        )
+        self._toggle.setObjectName("MediaWorkspaceStreamAccordionToggle")
+        self._title = title
+        self._toggle.clicked.connect(self._on_toggle)
+        column.addWidget(self._toggle)
+
+        self._content = QFrame(self)
+        self._content.setObjectName("MediaWorkspaceStreamAccordionContent")
+        self._content.setFrameShape(QFrame.Shape.StyledPanel)
+        self._content.setStyleSheet(
+            f"#MediaWorkspaceStreamAccordionContent {{ "
+            f"background: {c.surface}; "
+            f"border: 1px solid {c.border}; "
+            f"border-radius: {r.md}px; }}"
+        )
+        self._content_layout = QVBoxLayout(self._content)
+        self._content_layout.setContentsMargins(s.md, s.sm, s.md, s.sm)
+        self._content_layout.setSpacing(s.sm)
+        column.addWidget(self._content)
+
+    def add_row(self, label: str, control: QWidget) -> None:
+        """Append a labeled control row to the accordion content."""
+        s = self._theme.tokens.spacing
+        row = QWidget(self._content)
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(s.sm)
+        name = MetaLabel(self._theme, label, role="muted", style="body_small")
+        row_layout.addWidget(name, 0)
+        row_layout.addStretch(1)
+        row_layout.addWidget(control, 1)
+        self._content_layout.addWidget(row)
+
+    def _on_toggle(self) -> None:
+        """Flip the local expanded state (no external effect)."""
+        self._expanded = not self._expanded
+        self._content.setVisible(self._expanded)
+        chevron = (
+            self._CHEVRON_EXPANDED if self._expanded else self._CHEVRON_COLLAPSED
+        )
+        self._toggle.set_text(f"{chevron}  {self._title}")
 
 
 def build_media_workspace_screen(theme: ThemeManager) -> QWidget:
