@@ -1222,30 +1222,38 @@ class _StreamAccordion(QWidget):
             f"border: 1px solid {c.border}; "
             f"border-radius: {r.md}px; }}"
         )
-        # Shared unified grid: EVERY property row (add_axis_row /
-        # add_slider_row) places its widgets into the SAME columns so Scale,
-        # Position and Volume align on identical column boundaries like one
-        # clean table, rather than each row computing its own horizontal flow.
+        # Shared unified grid: EVERY property row places its widgets into the
+        # SAME columns so Scale, Position and Volume align on identical column
+        # boundaries like one clean table.
         #
-        #   col 0  -> property name (left margin)
-        #   col 1  -> X metric block  (axis rows) / slider (slider rows, spans 1-2)
-        #   col 2  -> Y metric block
-        #   col 3  -> outer-right tracking column (Link button / value field)
+        # Axis rows stack X over Y vertically (two grid rows each) so each
+        # coordinate field gets the FULL column width inside the narrow 300px
+        # sidebar instead of being squeezed side-by-side:
+        #
+        #   col 0 (name, spans 2 rows)   col 1 (expanding)   col 2
+        #   [Name                     ]  [X <field>       ]  [Link (spans 2)]
+        #                                [Y <field>       ]
+        #
+        # Slider rows use one grid row: name (col 0), slider (col 1), value
+        # field (col 2).
         self._grid = QGridLayout(self._content)
         self._grid.setContentsMargins(s.md, s.sm, s.md, s.sm)
-        self._grid.setHorizontalSpacing(s.md)
-        self._grid.setVerticalSpacing(s.sm)
-        # Column 0 absorbs spare width so the metric blocks sit against the
-        # right; columns 1-3 are content-sized and therefore uniform across
-        # rows. col 3 is the fixed outer-right tracking boundary.
-        self._grid.setColumnStretch(0, 1)
-        self._grid.setColumnStretch(1, 0)
+        self._grid.setHorizontalSpacing(s.sm)
+        self._grid.setVerticalSpacing(s.xs)
+        # col 0 = name (content width), col 1 = fields (absorbs spare width),
+        # col 2 = fixed outer-right tracking column (Link / value field).
+        self._grid.setColumnStretch(0, 0)
+        self._grid.setColumnStretch(1, 1)
         self._grid.setColumnStretch(2, 0)
-        self._grid.setColumnStretch(3, 0)
         column.addWidget(self._content)
 
     def _axis_block(self, axis: str, value: str) -> QWidget:
-        """Build a uniform ``[axis-label | field]`` metric block (X or Y)."""
+        """Build an ``[axis-label | field]`` metric block that fills its cell.
+
+        The field expands to the full column width -- the vertical X-over-Y
+        stack gives each coordinate the whole column -- so no fixed width is
+        imposed here.
+        """
         s = self._theme.tokens.spacing
         block = QWidget(self._content)
         block.setObjectName("MediaWorkspaceStreamAxisGroup")
@@ -1256,11 +1264,8 @@ class _StreamAccordion(QWidget):
         b_layout.addWidget(axis_lbl, 0, Qt.AlignmentFlag.AlignVCenter)
         field = TextField(self._theme, text=value)
         field.setObjectName("MediaWorkspaceStreamAxisField")
-        field.setFixedWidth(64)
-        field.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        b_layout.addWidget(field, 0)
-        # Uniform block width so X and Y form identical columns across rows.
-        block.setFixedWidth(84)
+        field.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        b_layout.addWidget(field, 1)
         return block
 
     def add_row(self, label: str, control: QWidget) -> None:
@@ -1273,7 +1278,7 @@ class _StreamAccordion(QWidget):
         control.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
-        self._grid.addWidget(control, self._grid_row, 1, 1, 3)
+        self._grid.addWidget(control, self._grid_row, 1, 1, 2)
         self._grid_row += 1
 
     def add_axis_row(
@@ -1291,19 +1296,19 @@ class _StreamAccordion(QWidget):
         row uses these same columns, Scale and Position align exactly.
         UI-only / decorative.
         """
+        top = self._grid_row
+        bottom = self._grid_row + 1
+
         name = MetaLabel(self._theme, label, role="muted", style="body_small")
+        # Name spans both coordinate rows, anchored top-left.
         self._grid.addWidget(
-            name, self._grid_row, 0,
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            name, top, 0, 2, 1,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
         )
-        self._grid.addWidget(
-            self._axis_block("X", value_x), self._grid_row, 1,
-            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-        )
-        self._grid.addWidget(
-            self._axis_block("Y", value_y), self._grid_row, 2,
-            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-        )
+        # X on the top grid row, Y directly beneath -- each field now fills
+        # the full column-1 width (fixes the horizontal squish).
+        self._grid.addWidget(self._axis_block("X", value_x), top, 1)
+        self._grid.addWidget(self._axis_block("Y", value_y), bottom, 1)
         if linked:
             link = NeonButton(
                 self._theme, "Link", variant="ghost", accent="cyan"
@@ -1312,22 +1317,23 @@ class _StreamAccordion(QWidget):
             link.setSizePolicy(
                 QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
             )
+            # Link spans both rows on the outer-right column, centered against
+            # the X/Y stack.
             self._grid.addWidget(
-                link, self._grid_row, 3,
+                link, top, 2, 2, 1,
                 Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
             )
-        self._grid_row += 1
+        self._grid_row += 2
 
     def add_slider_row(
         self, label: str, control: QWidget, value: str
     ) -> None:
         """Append a single-slider row into the shared grid.
 
-        Columns: 0 = name (left), 1-2 = the stretching horizontal slider
-        (spanning the same span the X/Y blocks occupy), 3 = one standalone
-        value field on the outer-right boundary. Shares the axis rows'
-        column boundaries so the name and the trailing value align with the
-        Transform rows above. UI-only / decorative.
+        Columns: 0 = name (left), 1 = the stretching horizontal slider,
+        2 = one standalone value field on the outer-right boundary. Shares
+        the axis rows' column boundaries so the name and the trailing value
+        align with the Transform rows above. UI-only / decorative.
         """
         name = MetaLabel(self._theme, label, role="muted", style="body_small")
         self._grid.addWidget(
@@ -1337,13 +1343,13 @@ class _StreamAccordion(QWidget):
         control.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
-        self._grid.addWidget(control, self._grid_row, 1, 1, 2)
+        self._grid.addWidget(control, self._grid_row, 1)
         field = TextField(self._theme, text=value)
         field.setObjectName("MediaWorkspaceStreamNumericField")
         field.setFixedWidth(64)
         field.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self._grid.addWidget(
-            field, self._grid_row, 3,
+            field, self._grid_row, 2,
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
         )
         self._grid_row += 1
