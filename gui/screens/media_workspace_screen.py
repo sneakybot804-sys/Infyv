@@ -1276,37 +1276,71 @@ class _StreamAccordion(QWidget):
     ) -> None:
         """Append an X / Y coordinate row with axis-prefixed numeric fields.
 
-        Each field is prefixed with a small ``X`` / ``Y`` axis label, matching
-        the reference Transform editor. When ``linked`` is True a token-bound,
-        wired-to-nothing "Link" toggle (ghost NeonButton) is appended to
-        indicate the axes are proportionally locked. UI-only / decorative.
+        Layout matrix (clean left-right split):
+
+            [Name] .... [X <field>]  [Y <field>]  [Link]
+
+        The property name is hard left-aligned; the two axis groups sit in the
+        right portion of the row and share its width uniformly (each axis label
+        sits directly beside its field); when ``linked`` is True a token-bound,
+        wired-to-nothing "Link" ghost NeonButton floats at the far right
+        margin, beyond the Y field. UI-only / decorative.
         """
         s = self._theme.tokens.spacing
         row = QWidget(self._content)
         row_layout = QHBoxLayout(row)
         row_layout.setContentsMargins(0, 0, 0, 0)
         row_layout.setSpacing(s.sm)
+
+        # Name: hard left, does not stretch.
         name = MetaLabel(self._theme, label, role="muted", style="body_small")
-        row_layout.addWidget(name, 0)
+        name.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        row_layout.addWidget(name, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+
+        # Single stretch pushes the axis groups to the right portion.
         row_layout.addStretch(1)
-        for axis, value in (("X", value_x), ("Y", value_y)):
+
+        def _axis_group(axis: str, value: str) -> QWidget:
+            """Build an [axis-label | field] group that expands uniformly."""
+            group = QWidget(row)
+            group.setObjectName("MediaWorkspaceStreamAxisGroup")
+            g_layout = QHBoxLayout(group)
+            g_layout.setContentsMargins(0, 0, 0, 0)
+            g_layout.setSpacing(s.xs)
             axis_lbl = MetaLabel(
                 self._theme, axis, role="disabled", style="caption"
             )
-            row_layout.addWidget(axis_lbl, 0, Qt.AlignmentFlag.AlignVCenter)
+            g_layout.addWidget(
+                axis_lbl, 0, Qt.AlignmentFlag.AlignVCenter
+            )
             field = TextField(self._theme, text=value)
             field.setObjectName("MediaWorkspaceStreamAxisField")
-            field.setMaximumWidth(60)
             field.setSizePolicy(
-                QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
             )
-            row_layout.addWidget(field, 0, Qt.AlignmentFlag.AlignRight)
+            g_layout.addWidget(field, 1)
+            return group
+
+        # The two axis groups share the right portion uniformly (stretch 1
+        # each) so the fields extend evenly toward the right frame edge
+        # instead of bunching in the middle.
+        row_layout.addWidget(_axis_group("X", value_x), 1)
+        row_layout.addWidget(_axis_group("Y", value_y), 1)
+
+        # Link floats at the far right margin, past the Y field; fixed width
+        # so it never consumes the fields' share of the row.
         if linked:
             link = NeonButton(
                 self._theme, "Link", variant="ghost", accent="cyan"
             )
             link.setObjectName("MediaWorkspaceStreamAxisLink")
-            row_layout.addWidget(link, 0, Qt.AlignmentFlag.AlignRight)
+            link.setSizePolicy(
+                QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
+            )
+            row_layout.addWidget(
+                link, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
+
         self._content_layout.addWidget(row)
 
     def add_slider_row(
