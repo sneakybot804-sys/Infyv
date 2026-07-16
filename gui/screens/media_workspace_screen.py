@@ -41,7 +41,7 @@ from gui.widgets.glass_card import GlassCard
 from gui.widgets.media_browser import MediaBrowser
 from gui.widgets.meta_label import MetaLabel
 from gui.widgets.navigation_sidebar import NavigationSidebar
-from PySide6.QtWidgets import QScrollArea, QSizePolicy
+from PySide6.QtWidgets import QGridLayout, QScrollArea, QSizePolicy
 from gui.widgets.neon_button import NeonButton
 from gui.widgets.progress_bar import ProgressBar
 from gui.widgets.section_header import SectionHeader
@@ -1194,6 +1194,7 @@ class _StreamAccordion(QWidget):
         super().__init__()
         self._theme = theme
         self._expanded = True
+        self._grid_row = 0
         tokens = theme.tokens
         c = tokens.colors
         r = tokens.radius
@@ -1221,51 +1222,59 @@ class _StreamAccordion(QWidget):
             f"border: 1px solid {c.border}; "
             f"border-radius: {r.md}px; }}"
         )
-        self._content_layout = QVBoxLayout(self._content)
-        self._content_layout.setContentsMargins(s.md, s.sm, s.md, s.sm)
-        self._content_layout.setSpacing(s.sm)
+        # Shared unified grid: EVERY property row (add_axis_row /
+        # add_slider_row) places its widgets into the SAME columns so Scale,
+        # Position and Volume align on identical column boundaries like one
+        # clean table, rather than each row computing its own horizontal flow.
+        #
+        #   col 0  -> property name (left margin)
+        #   col 1  -> X metric block  (axis rows) / slider (slider rows, spans 1-2)
+        #   col 2  -> Y metric block
+        #   col 3  -> outer-right tracking column (Link button / value field)
+        self._grid = QGridLayout(self._content)
+        self._grid.setContentsMargins(s.md, s.sm, s.md, s.sm)
+        self._grid.setHorizontalSpacing(s.md)
+        self._grid.setVerticalSpacing(s.sm)
+        # Column 0 absorbs spare width so the metric blocks sit against the
+        # right; columns 1-3 are content-sized and therefore uniform across
+        # rows. col 3 is the fixed outer-right tracking boundary.
+        self._grid.setColumnStretch(0, 1)
+        self._grid.setColumnStretch(1, 0)
+        self._grid.setColumnStretch(2, 0)
+        self._grid.setColumnStretch(3, 0)
         column.addWidget(self._content)
 
+    def _axis_block(self, axis: str, value: str) -> QWidget:
+        """Build a uniform ``[axis-label | field]`` metric block (X or Y)."""
+        s = self._theme.tokens.spacing
+        block = QWidget(self._content)
+        block.setObjectName("MediaWorkspaceStreamAxisGroup")
+        b_layout = QHBoxLayout(block)
+        b_layout.setContentsMargins(0, 0, 0, 0)
+        b_layout.setSpacing(s.xs)
+        axis_lbl = MetaLabel(self._theme, axis, role="disabled", style="caption")
+        b_layout.addWidget(axis_lbl, 0, Qt.AlignmentFlag.AlignVCenter)
+        field = TextField(self._theme, text=value)
+        field.setObjectName("MediaWorkspaceStreamAxisField")
+        field.setFixedWidth(64)
+        field.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        b_layout.addWidget(field, 0)
+        # Uniform block width so X and Y form identical columns across rows.
+        block.setFixedWidth(84)
+        return block
+
     def add_row(self, label: str, control: QWidget) -> None:
-        """Append a labeled control row to the accordion content."""
-        s = self._theme.tokens.spacing
-        row = QWidget(self._content)
-        row_layout = QHBoxLayout(row)
-        row_layout.setContentsMargins(0, 0, 0, 0)
-        row_layout.setSpacing(s.sm)
+        """Append a simple labeled control spanning the metric columns."""
         name = MetaLabel(self._theme, label, role="muted", style="body_small")
-        row_layout.addWidget(name, 0)
-        row_layout.addStretch(1)
-        row_layout.addWidget(control, 1)
-        self._content_layout.addWidget(row)
-
-    def add_dual_row(
-        self, label: str, value_x: str, value_y: str
-    ) -> None:
-        """Append a row with two right-aligned numeric input fields (X / Y).
-
-        Matches the reference property-editor layout: a left-hand label with
-        two compact, right-aligned :class:`TextField`s (e.g. Scale ->
-        ``100.0%`` / ``100.0%``, Position -> ``0.0`` / ``0.0``). UI-only:
-        the fields are decorative and wired to nothing.
-        """
-        s = self._theme.tokens.spacing
-        row = QWidget(self._content)
-        row_layout = QHBoxLayout(row)
-        row_layout.setContentsMargins(0, 0, 0, 0)
-        row_layout.setSpacing(s.sm)
-        name = MetaLabel(self._theme, label, role="muted", style="body_small")
-        row_layout.addWidget(name, 0)
-        row_layout.addStretch(1)
-        for value in (value_x, value_y):
-            field = TextField(self._theme, text=value)
-            field.setObjectName("MediaWorkspaceStreamNumericField")
-            field.setMaximumWidth(72)
-            field.setSizePolicy(
-                QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
-            )
-            row_layout.addWidget(field, 0, Qt.AlignmentFlag.AlignRight)
-        self._content_layout.addWidget(row)
+        self._grid.addWidget(
+            name, self._grid_row, 0,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+        )
+        control.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
+        self._grid.addWidget(control, self._grid_row, 1, 1, 3)
+        self._grid_row += 1
 
     def add_axis_row(
         self,
@@ -1275,67 +1284,26 @@ class _StreamAccordion(QWidget):
         *,
         linked: bool = False,
     ) -> None:
-        """Append an X / Y coordinate row with a strict column-split grid.
+        """Append an X / Y coordinate row into the shared grid.
 
-        Uses a :class:`QGridLayout` so alignment is enforced by columns rather
-        than by a crowded single strip:
-
-            col 0        col 1     col 2        col 3     col 4     col 5
-            [Name .......] [X grp] [gap] [Y grp] [Link]
-
-        * col 0 (name) is left-aligned and absorbs the stretch, holding the
-          X/Y blocks against the right margin.
-        * cols 1 and 3 hold the [axis-label | field] groups.
-        * col 2 is an explicit inter-axis gap so X and Y are not glued.
-        * col 4 floats the token-bound, wired-to-nothing "Link" ghost button
-          on the outer right boundary (only when ``linked``).
-
+        Columns: 0 = name (left), 1 = X block, 2 = Y block, 3 = optional
+        "Link" ghost button on the outer-right boundary. Because every axis
+        row uses these same columns, Scale and Position align exactly.
         UI-only / decorative.
         """
-        from PySide6.QtWidgets import QGridLayout
-
-        s = self._theme.tokens.spacing
-        row = QWidget(self._content)
-        grid = QGridLayout(row)
-        grid.setContentsMargins(0, 0, 0, 0)
-        grid.setHorizontalSpacing(s.sm)
-        grid.setVerticalSpacing(0)
-
-        # Name: strictly left-aligned; its column takes all spare width so the
-        # coordinate blocks are pinned to the right margin.
         name = MetaLabel(self._theme, label, role="muted", style="body_small")
-        grid.addWidget(
-            name, 0, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        self._grid.addWidget(
+            name, self._grid_row, 0,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
         )
-        grid.setColumnStretch(0, 1)
-
-        def _axis_group(axis: str, value: str) -> QWidget:
-            """Build an [axis-label | field] group of a uniform fixed width."""
-            group = QWidget(row)
-            group.setObjectName("MediaWorkspaceStreamAxisGroup")
-            g_layout = QHBoxLayout(group)
-            g_layout.setContentsMargins(0, 0, 0, 0)
-            g_layout.setSpacing(s.xs)
-            axis_lbl = MetaLabel(
-                self._theme, axis, role="disabled", style="caption"
-            )
-            g_layout.addWidget(axis_lbl, 0, Qt.AlignmentFlag.AlignVCenter)
-            field = TextField(self._theme, text=value)
-            field.setObjectName("MediaWorkspaceStreamAxisField")
-            field.setSizePolicy(
-                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
-            )
-            g_layout.addWidget(field, 1)
-            # Uniform block width so X and Y are identical, right-aligned
-            # columns rather than ragged.
-            group.setFixedWidth(84)
-            return group
-
-        grid.addWidget(_axis_group("X", value_x), 0, 1)
-        # Explicit inter-axis gap column so the X and Y blocks are not glued.
-        grid.setColumnMinimumWidth(2, s.md)
-        grid.addWidget(_axis_group("Y", value_y), 0, 3)
-
+        self._grid.addWidget(
+            self._axis_block("X", value_x), self._grid_row, 1,
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+        )
+        self._grid.addWidget(
+            self._axis_block("Y", value_y), self._grid_row, 2,
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+        )
         if linked:
             link = NeonButton(
                 self._theme, "Link", variant="ghost", accent="cyan"
@@ -1344,43 +1312,41 @@ class _StreamAccordion(QWidget):
             link.setSizePolicy(
                 QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
             )
-            grid.addWidget(
-                link, 0, 4,
+            self._grid.addWidget(
+                link, self._grid_row, 3,
                 Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
             )
-        else:
-            # Keep column 4 present (empty) so linked / unlinked rows align
-            # their X/Y blocks to the same right boundary.
-            grid.setColumnMinimumWidth(4, 0)
-
-        self._content_layout.addWidget(row)
+        self._grid_row += 1
 
     def add_slider_row(
         self, label: str, control: QWidget, value: str
     ) -> None:
-        """Append a row with a label, an expanding slider and one value field.
+        """Append a single-slider row into the shared grid.
 
-        Used for Audio (Volume): a single horizontal :class:`Slider` that
-        absorbs the row width plus one compact, right-aligned value field.
-        UI-only / decorative.
+        Columns: 0 = name (left), 1-2 = the stretching horizontal slider
+        (spanning the same span the X/Y blocks occupy), 3 = one standalone
+        value field on the outer-right boundary. Shares the axis rows'
+        column boundaries so the name and the trailing value align with the
+        Transform rows above. UI-only / decorative.
         """
-        s = self._theme.tokens.spacing
-        row = QWidget(self._content)
-        row_layout = QHBoxLayout(row)
-        row_layout.setContentsMargins(0, 0, 0, 0)
-        row_layout.setSpacing(s.sm)
         name = MetaLabel(self._theme, label, role="muted", style="body_small")
-        row_layout.addWidget(name, 0)
+        self._grid.addWidget(
+            name, self._grid_row, 0,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+        )
         control.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
-        row_layout.addWidget(control, 1)
+        self._grid.addWidget(control, self._grid_row, 1, 1, 2)
         field = TextField(self._theme, text=value)
         field.setObjectName("MediaWorkspaceStreamNumericField")
-        field.setMaximumWidth(64)
+        field.setFixedWidth(64)
         field.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        row_layout.addWidget(field, 0, Qt.AlignmentFlag.AlignRight)
-        self._content_layout.addWidget(row)
+        self._grid.addWidget(
+            field, self._grid_row, 3,
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+        )
+        self._grid_row += 1
 
     def _on_toggle(self) -> None:
         """Flip the local expanded state (no external effect)."""
