@@ -839,11 +839,12 @@ class _MediaWorkspace(QWidget):
 
         audio_acc = self._build_stream_accordion("Audio")
         # Single horizontal slider + one matching numeric field (not a dual
-        # input) so Audio reads as a level control, per the reference.
+        # input) so Audio reads as a level control, per the reference. The
+        # value is shown in decibels (0.0 dB) to match premium editor tools.
         audio_acc.add_slider_row(
             "Volume",
             Slider(self._theme, minimum=0.0, maximum=200.0, value=100.0, accent="blue"),
-            "100%",
+            "0.0 dB",
         )
         stream.addWidget(audio_acc)
 
@@ -1274,34 +1275,42 @@ class _StreamAccordion(QWidget):
         *,
         linked: bool = False,
     ) -> None:
-        """Append an X / Y coordinate row with axis-prefixed numeric fields.
+        """Append an X / Y coordinate row with a strict column-split grid.
 
-        Layout matrix (clean left-right split):
+        Uses a :class:`QGridLayout` so alignment is enforced by columns rather
+        than by a crowded single strip:
 
-            [Name] .... [X <field>]  [Y <field>]  [Link]
+            col 0        col 1     col 2        col 3     col 4     col 5
+            [Name .......] [X grp] [gap] [Y grp] [Link]
 
-        The property name is hard left-aligned; the two axis groups sit in the
-        right portion of the row and share its width uniformly (each axis label
-        sits directly beside its field); when ``linked`` is True a token-bound,
-        wired-to-nothing "Link" ghost NeonButton floats at the far right
-        margin, beyond the Y field. UI-only / decorative.
+        * col 0 (name) is left-aligned and absorbs the stretch, holding the
+          X/Y blocks against the right margin.
+        * cols 1 and 3 hold the [axis-label | field] groups.
+        * col 2 is an explicit inter-axis gap so X and Y are not glued.
+        * col 4 floats the token-bound, wired-to-nothing "Link" ghost button
+          on the outer right boundary (only when ``linked``).
+
+        UI-only / decorative.
         """
+        from PySide6.QtWidgets import QGridLayout
+
         s = self._theme.tokens.spacing
         row = QWidget(self._content)
-        row_layout = QHBoxLayout(row)
-        row_layout.setContentsMargins(0, 0, 0, 0)
-        row_layout.setSpacing(s.sm)
+        grid = QGridLayout(row)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(s.sm)
+        grid.setVerticalSpacing(0)
 
-        # Name: hard left, does not stretch.
+        # Name: strictly left-aligned; its column takes all spare width so the
+        # coordinate blocks are pinned to the right margin.
         name = MetaLabel(self._theme, label, role="muted", style="body_small")
-        name.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
-        row_layout.addWidget(name, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-
-        # Single stretch pushes the axis groups to the right portion.
-        row_layout.addStretch(1)
+        grid.addWidget(
+            name, 0, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
+        grid.setColumnStretch(0, 1)
 
         def _axis_group(axis: str, value: str) -> QWidget:
-            """Build an [axis-label | field] group that expands uniformly."""
+            """Build an [axis-label | field] group of a uniform fixed width."""
             group = QWidget(row)
             group.setObjectName("MediaWorkspaceStreamAxisGroup")
             g_layout = QHBoxLayout(group)
@@ -1310,25 +1319,23 @@ class _StreamAccordion(QWidget):
             axis_lbl = MetaLabel(
                 self._theme, axis, role="disabled", style="caption"
             )
-            g_layout.addWidget(
-                axis_lbl, 0, Qt.AlignmentFlag.AlignVCenter
-            )
+            g_layout.addWidget(axis_lbl, 0, Qt.AlignmentFlag.AlignVCenter)
             field = TextField(self._theme, text=value)
             field.setObjectName("MediaWorkspaceStreamAxisField")
             field.setSizePolicy(
                 QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
             )
             g_layout.addWidget(field, 1)
+            # Uniform block width so X and Y are identical, right-aligned
+            # columns rather than ragged.
+            group.setFixedWidth(84)
             return group
 
-        # The two axis groups share the right portion uniformly (stretch 1
-        # each) so the fields extend evenly toward the right frame edge
-        # instead of bunching in the middle.
-        row_layout.addWidget(_axis_group("X", value_x), 1)
-        row_layout.addWidget(_axis_group("Y", value_y), 1)
+        grid.addWidget(_axis_group("X", value_x), 0, 1)
+        # Explicit inter-axis gap column so the X and Y blocks are not glued.
+        grid.setColumnMinimumWidth(2, s.md)
+        grid.addWidget(_axis_group("Y", value_y), 0, 3)
 
-        # Link floats at the far right margin, past the Y field; fixed width
-        # so it never consumes the fields' share of the row.
         if linked:
             link = NeonButton(
                 self._theme, "Link", variant="ghost", accent="cyan"
@@ -1337,9 +1344,14 @@ class _StreamAccordion(QWidget):
             link.setSizePolicy(
                 QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
             )
-            row_layout.addWidget(
-                link, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            grid.addWidget(
+                link, 0, 4,
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
             )
+        else:
+            # Keep column 4 present (empty) so linked / unlinked rows align
+            # their X/Y blocks to the same right boundary.
+            grid.setColumnMinimumWidth(4, 0)
 
         self._content_layout.addWidget(row)
 
