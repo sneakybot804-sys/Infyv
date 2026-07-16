@@ -752,55 +752,55 @@ class _MediaWorkspace(QWidget):
             card = QFrame()
             card.setObjectName("MediaWorkspaceAiToolCard")
             card.setFrameShape(QFrame.Shape.StyledPanel)
-            # Minimum (not fixed) height with a Minimum vertical policy: the
-            # card can grow taller when the wrapped description needs a second
-            # line, so rows never collide. The floor keeps single-line cards
-            # visually uniform.
-            card.setMinimumHeight(64)
+            # Adaptive height: allow two title lines + a description without
+            # truncation. A raised floor keeps single-line cards uniform, and
+            # MinimumExpanding lets a wrapped title grow the card instead of
+            # clipping ("Highlight Det...").
+            card.setMinimumHeight(72)
             card.setSizePolicy(
-                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.MinimumExpanding,
             )
             card.setStyleSheet(card_qss)
             card_layout = QVBoxLayout(card)
             card_layout.setContentsMargins(s.sm, s.sm, s.sm, s.sm)
             # Real vertical breathing room between the title row and the
             # description so the two never bleed into each other.
-            card_layout.setSpacing(s.xs)
+            card_layout.setSpacing(s.xxs)
 
-            # Title row: title takes the flexible space and is kept on ONE
-            # row (no wrap); a stretch separates it from the compact AI chip,
-            # which is pinned hard to the right margin so it can never
-            # encroach on the title's display area or force it to wrap.
+            # Title row: the title MAY wrap to a second line (multi-word tools
+            # like "Highlight Detection") and takes the flexible space; the
+            # compact AI chip is pinned to the top-right so it never steals
+            # width from the title.
             title_row = QHBoxLayout()
             title_row.setContentsMargins(0, 0, 0, 0)
             title_row.setSpacing(s.xs)
             title_lbl = QLabel(title, card)
             title_lbl.setObjectName("MediaWorkspaceAiToolTitle")
             title_lbl.setFont(self._theme.font("caption"))
-            title_lbl.setWordWrap(False)
-            title_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+            title_lbl.setWordWrap(True)
+            title_lbl.setTextInteractionFlags(
+                Qt.TextInteractionFlag.NoTextInteraction
+            )
             title_lbl.setStyleSheet(
                 f"#MediaWorkspaceAiToolTitle {{ color: {c.text_primary}; "
                 f"background: transparent; }}"
             )
             title_lbl.setSizePolicy(
-                QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+                QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred
             )
             title_row.addWidget(title_lbl, 1)
-            title_row.addStretch(0)
             badge = QLabel("AI", card)
             badge.setObjectName("MediaWorkspaceAiToolBadge")
             badge.setFont(self._theme.font("caption"))
             badge.setStyleSheet(chip_qss)
-            # Chip hugs its own size hint so it stays a compact element on the
-            # right edge and never stretches across the title.
             badge.setSizePolicy(
                 QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
             )
             title_row.addWidget(
                 badge,
                 0,
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop,
             )
             card_layout.addLayout(title_row)
 
@@ -813,6 +813,7 @@ class _MediaWorkspace(QWidget):
                 QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
             )
             card_layout.addWidget(desc_lbl)
+            card_layout.addStretch(1)
 
             # Top-align each cell so an uneven (two-line) card in one column
             # does not vertically stretch its single-line neighbour.
