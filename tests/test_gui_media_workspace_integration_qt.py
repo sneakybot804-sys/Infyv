@@ -111,6 +111,18 @@ def _transport(screen) -> TransportBar:
     return bar
 
 
+def _detail_status_text(screen) -> str:
+    """Return the Details Status MetaLabel text via the screen's reference.
+
+    The Status row is a MetaLabel without a distinct object name, so it is
+    read through the screen's stored _detail_status attribute (a stable
+    reference set at construction). Supports either .text() or .get_text().
+    """
+    label = screen._detail_status
+    getter = getattr(label, "text", None) or getattr(label, "get_text", None)
+    return getter()
+
+
 # ---------------------------------------------------------------------- #
 # UI-only mode (no controller): original behavior is preserved.
 # ---------------------------------------------------------------------- #
@@ -201,12 +213,7 @@ def test_status_reflects_artifacts(theme, facade, tmp_path):
     # reflects real artifact presence (existing Details UI, no new widget).
     state = controller.project_state()
     assert len(state.artifacts) == 1
-    status = _find(screen, None)  # keep _find imported; assert via label below
-    del status
-    assert (
-        _detail_status_text(screen) == "Status: \u00b7 1 artifact"
-        or _detail_status_text(screen) == "Status: ready \u00b7 1 artifact"
-    )
+    assert _detail_status_text(screen) == "Status: ready \u00b7 1 artifact"
     controller.stop()
 
 
