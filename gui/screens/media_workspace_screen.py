@@ -95,6 +95,11 @@ class _MediaWorkspace(QWidget):
         # backend video selection resolves). Decoding is owned by the backend
         # FFmpegService via the controller; the screen only requests frames.
         self._media_path = None
+        # Qt Multimedia audio layer (created lazily on first play). Kept None
+        # when QtMultimedia is unavailable so the screen stays video-only.
+        self._audio_player = None
+        self._audio_output = None
+        self._audio_loaded_for = None
         self.setObjectName("MediaWorkspaceScreen")
         self.setWindowTitle("AI Gaming Video Editor \u2014 Media")
 
@@ -242,6 +247,13 @@ class _MediaWorkspace(QWidget):
         self._transport.play_requested.connect(self._timeline.play)
         self._transport.pause_requested.connect(self._timeline.pause)
         self._transport.stop_requested.connect(self._timeline.stop)
+        # Audio playback (Qt Multimedia), connected additively to the same
+        # transport signals so audio follows the existing controls and stays
+        # synchronized to the timeline playhead (no second playback clock).
+        self._transport.play_requested.connect(self._on_audio_play)
+        self._transport.pause_requested.connect(self._on_audio_pause)
+        self._transport.stop_requested.connect(self._on_audio_stop)
+        self._transport.seek_requested.connect(self._on_audio_seek)
         self._timeline.playback_state_changed.connect(
             self._on_playback_state_changed
         )
@@ -1274,6 +1286,78 @@ class _MediaWorkspace(QWidget):
         self._preview_frame.setVisible(False)
         self._preview_placeholder.setVisible(True)
 
+    # ------------------------------------------------------------------ #
+    # Audio playback (Qt Multimedia; synchronized to the timeline playhead)
+    # ------------------------------------------------------------------ #
+    def _ensure_audio_player(self):
+        """Create the QMediaPlayer/QAudioOutput lazily; return the player.
+
+        Returns ``None`` when Qt Multimedia is unavailable (the screen then
+        stays video-only). Idempotent.
+        """
+        if self._audio_player is not None:
+            return self._audio_player
+        try:
+            from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+        except Exception:
+            return None
+        self._audio_player = QMediaPlayer(self)
+        self._audio_output = QAudioOutput(self)
+        self._audio_player.setAudioOutput(self._audio_output)
+        return self._audio_player
+
+    def _ensure_audio_loaded(self) -> bool:
+        """Extract (once) and load the audio track for the selected media.
+
+        Returns whether a player is ready with the current media's audio.
+        Reuses the backend FFmpegService.extract_audio via the controller.
+        Best-effort: any failure leaves the screen video-only.
+        """
+        if self._controller is None or self._media_path is None:
+            return False
+        player = self._ensure_audio_player()
+        if player is None:
+            return False
+        if self._audio_loaded_for == self._media_path:
+            return True
+        try:
+            from PySide6.QtCore import QUrl
+
+            audio_path = self._controller.extract_audio(self._media_path)
+            player.setSource(QUrl.fromLocalFile(str(audio_path)))
+            self._audio_loaded_for = self._media_path
+            return True
+        except Exception:
+            return False
+
+    def _on_audio_play(self) -> None:
+        """Start/resume audio playback (loads the track on first play)."""
+        if self._ensure_audio_loaded():
+            self._audio_player.play()
+
+    def _on_audio_pause(self) -> None:
+        """Pause audio playback if a player exists."""
+        if self._audio_player is not None:
+            self._audio_player.pause()
+
+    def _on_audio_stop(self) -> None:
+        """Stop audio playback (and rewind) if a player exists."""
+        if self._audio_player is not None:
+            self._audio_player.stop()
+
+    def _on_audio_seek(self, fraction: float) -> None:
+        """Seek audio to ``fraction`` of the timeline duration (ms position)."""
+        if self._audio_player is None:
+            return
+        duration = self._timeline.duration()
+        self._audio_player.setPosition(int(max(0.0, fraction) * duration * 1000))
+
+    def _reset_audio_for_new_media(self) -> None:
+        """Stop audio and invalidate the cached track for a new selection."""
+        if self._audio_player is not None:
+            self._audio_player.stop()
+        self._audio_loaded_for = None
+
     def _reflect_selected_video(self, item: str) -> None:
         """Drive ``select_video`` and reflect the controller's ProjectState.
 
@@ -1326,8 +1410,10 @@ class _MediaWorkspace(QWidget):
         self._preview_header.set_subtitle(display)
         self._preview_placeholder.setText(display)
 
-        # Record the media path and show the first real frame (t=0).
+        # Record the media path and show the first real frame (t=0). A new
+        # selection invalidates any previously loaded audio track.
         self._media_path = video_path
+        self._reset_audio_for_new_media()
         self._decode_and_show(0.0)
 
         # Details metadata derived directly from ProjectState (no fabrication).
