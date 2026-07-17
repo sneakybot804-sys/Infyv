@@ -1544,23 +1544,62 @@ class _MediaWorkspace(QWidget):
         """
         self._clip_inspector.show_clip(self._timeline.selected_clip())
 
+    def _persist_timeline_to_backend(self) -> None:
+        """Persist the Timeline widget's current model into the backend.
+
+        Maps the widget's tracks/clips into a validated gui_core.Timeline and
+        calls controller.update_timeline (publishing TimelineChanged), so the
+        backend ProjectState.timeline follows the widget edits. No-op without
+        a controller; best-effort on validation errors (an invalid transient
+        edit must never crash the UI thread).
+        """
+        if self._controller is None:
+            return
+        try:
+            from gui_core import Timeline, Track
+            from gui_core.timeline import Clip as BackendClip
+
+            names = self._timeline.tracks()
+            tracks = tuple(
+                Track(index=i, name=name) for i, name in enumerate(names)
+            )
+            duration = float(self._timeline.duration())
+            backend = Timeline(duration=duration, tracks=tracks)
+            for i, clip in enumerate(self._timeline.clips()):
+                backend = backend.add_clip(
+                    BackendClip(
+                        id=f"clip_{i}",
+                        track_index=int(clip.get("track", 0)),
+                        start=float(clip.get("start", 0.0)),
+                        length=float(clip.get("length", 0.0)),
+                        label=str(clip.get("label", "")),
+                    )
+                )
+            self._controller.update_timeline(backend)
+        except Exception:
+            return
+
     def _on_clip_moved(self, index: int, new_track: int) -> None:
         """Refresh the clip inspector after a timeline clip is moved (UI-only).
 
         A drag-move changes the clip's track without changing the selection
         index (so :attr:`clip_selected` is not re-emitted); re-show the
-        currently selected clip so the inspector reflects its new track.
+        currently selected clip so the inspector reflects its new track, then
+        persist the widget's model into the backend Timeline.
         """
         self._clip_inspector.show_clip(self._timeline.selected_clip())
+        self._persist_timeline_to_backend()
 
     def _on_clip_trimmed(self, index: int, start: float, length: float) -> None:
         """Refresh the clip inspector after a timeline clip is trimmed (UI-only).
 
         An edge trim changes the clip's start/length without changing the
         selection index (so :attr:`clip_selected` is not re-emitted); re-show
-        the currently selected clip so the inspector reflects its new bounds.
+        the currently selected clip so the inspector reflects its new bounds,
+        then persist the widget's model into the backend Timeline.
         """
         self._clip_inspector.show_clip(self._timeline.selected_clip())
+        self._persist_timeline_to_backend()
 
     def _on_playback_state_changed(self, state: str) -> None:
         """Mirror the timeline transport state onto the TransportBar (UI-only)."""
