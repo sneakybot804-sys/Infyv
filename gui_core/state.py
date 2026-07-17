@@ -18,6 +18,7 @@ from typing import Dict, Optional, Tuple
 
 from gui_core.artifacts import ArtifactInfo, ArtifactResolver
 from gui_core.events import Event, EventBus
+from gui_core.timeline import Timeline
 
 
 @dataclass(frozen=True)
@@ -29,12 +30,14 @@ class ProjectState:
         video_path: The selected source video, if any.
         artifacts: The artifacts discovered for the selected video.
         settings: A read-only view of current settings key/value pairs.
+        timeline: The current immutable timeline model, if any.
     """
 
     project_path: Optional[Path] = None
     video_path: Optional[Path] = None
     artifacts: Tuple[ArtifactInfo, ...] = ()
     settings: Dict[str, object] = field(default_factory=dict)
+    timeline: Optional[Timeline] = None
 
     @property
     def video_stem(self) -> Optional[str]:
@@ -106,4 +109,15 @@ class StateStore:
         new_settings[key] = value
         self._state = replace(self._state, settings=new_settings)
         self._bus.publish(Event.SettingsChanged, {"key": key, "value": value})
+        return self._state
+
+    def update_timeline(self, timeline: Timeline) -> ProjectState:
+        """Replace the timeline and publish ``TimelineChanged``.
+
+        The timeline is an immutable snapshot owned here; this replaces the
+        current ProjectState with a new snapshot and publishes the replayable
+        TimelineChanged event carrying the timeline as a plain dict.
+        """
+        self._state = replace(self._state, timeline=timeline)
+        self._bus.publish(Event.TimelineChanged, {"timeline": timeline.to_dict()})
         return self._state
