@@ -1190,6 +1190,9 @@ class _MediaWorkspace(QWidget):
         self._detail_name.set_text("Name: \u2014")
         self._detail_kind.set_text("Type: \u2014")
         self._detail_status.set_text("Status: no selection")
+        # Timeline reflects the (empty) selection by returning to the start
+        # via its existing public API; its clip model is unchanged.
+        self._timeline.set_playhead(0.0)
 
     def _reflect_selected_video(self, item: str) -> None:
         """Drive ``select_video`` and reflect the controller's ProjectState.
@@ -1252,6 +1255,12 @@ class _MediaWorkspace(QWidget):
         # only. TransportBar stays the single playback-state owner.
         self._transport.set_state("stopped")
         self._transport.set_position(0.0)
+
+        # Timeline reflects the new selection by returning the playhead to the
+        # start via its existing public API. ProjectState carries no clip /
+        # track / marker data, so no clips are created here; the Timeline
+        # remains the owner of its own clip and playback state.
+        self._timeline.set_playhead(0.0)
 
     @staticmethod
     def _artifact_status(state) -> str:
