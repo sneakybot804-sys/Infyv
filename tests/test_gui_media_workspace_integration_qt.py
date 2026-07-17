@@ -142,9 +142,9 @@ def test_ui_reflects_backend_project_state(theme, facade, tmp_path):
     browser.set_items([str(clip)])
     browser.select(0)
 
-    # The Details name label reflects the backend video_path name.
-    name_label = _find(screen, None)  # placeholder to keep _find imported
-    subtitle_owner = screen  # the header is internal; assert via project_state
+    # The screen reflects the authoritative backend video_path name (the
+    # Details/preview labels are internal; project_state is the contract the
+    # screen reads and mirrors).
     assert controller.project_state().video_path.name == "highlight_reel.mp4"
     controller.stop()
 
