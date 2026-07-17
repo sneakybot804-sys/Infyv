@@ -24,7 +24,6 @@ from gui_core.pipeline import Pipeline
 from gui_core.producers import DefaultProducerFactories
 from gui_core.registry import PhasePlugin, PluginRegistry, register_builtins
 from gui_core.runner import PhaseRunner
-from gui_core.frame_provider import FrameProvider
 from gui_core.state import ProjectState, StateStore
 from gui_core.timeline import Timeline
 
@@ -91,15 +90,6 @@ class ApplicationFacade:
     def update_timeline(self, timeline: Timeline) -> ProjectState:
         """Replace the timeline and publish ``TimelineChanged``."""
         return self._store.update_timeline(timeline)
-
-    def frame_provider_for(self, path: str | Path) -> FrameProvider:
-        """Return a Qt-free :class:`FrameProvider` for ``path`` (decoding only).
-
-        The provider is not opened here; the caller opens/closes it (or uses
-        it as a context manager). The UI obtains decoders through this factory
-        rather than importing the decoding module directly.
-        """
-        return FrameProvider(path)
 
     # ------------------------------------------------------------------ #
     # Phases (delegates to Pipeline / registry / runner)
