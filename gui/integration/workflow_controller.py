@@ -191,6 +191,14 @@ class WorkflowController(QObject):
         """Replace the timeline via the facade (publishes TimelineChanged)."""
         return self._facade.update_timeline(timeline)
 
+    def media_metadata(self, path):
+        """Return media metadata via the facade's FFmpegService (thin)."""
+        return self._facade.media_metadata(path)
+
+    def decode_frame(self, path, seconds):
+        """Decode one BGR frame at ``seconds`` via the facade (thin)."""
+        return self._facade.decode_frame(path, seconds)
+
     # ------------------------------------------------------------------ #
     # Execution (background, single-flight)
     # ------------------------------------------------------------------ #
