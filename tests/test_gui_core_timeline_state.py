@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from gui_core.artifacts import ArtifactResolver
 from gui_core.events import Event, EventBus
 from gui_core.facade import ApplicationFacade
+from gui_core.registry import PluginRegistry
 from gui_core.state import StateStore
 from gui_core.timeline import Clip, Timeline, Track
 
@@ -40,8 +41,9 @@ def test_statestore_update_timeline_publishes_replayable(tmp_path):
 
 def test_facade_timeline_roundtrip(tmp_path):
     config = SimpleNamespace(paths=SimpleNamespace(output_dir=tmp_path))
-    facade = ApplicationFacade(config, producers=object(), registry=None)
-    # registry=None triggers built-in registration; safe for a read/write test.
+    facade = ApplicationFacade(
+        config, producers=object(), registry=PluginRegistry()
+    )
     assert facade.timeline() is None
     tl = _timeline()
     facade.update_timeline(tl)
