@@ -294,18 +294,7 @@ def test_clear_selection_resets_empty_state(theme, facade, tmp_path):
     controller.stop()
 
 
-def test_run_first_available_phase_without_video(theme, facade):
-    controller = WorkflowController(facade)
-    controller.start()
-    screen = build_media_workspace_screen(theme, controller)
-
-    # No video selected -> no runnable phase.
-    assert screen.run_first_available_phase() is False
-    assert screen._preview_status_badge.text() == "No phases"
-    controller.stop()
-
-
-def test_run_first_available_phase_reflects_completion(theme, facade, tmp_path):
+def test_run_phase_reflects_completion(theme, facade, tmp_path):
     clip = tmp_path / "clip_01.mp4"
     clip.write_bytes(b"x")
 
@@ -317,11 +306,17 @@ def test_run_first_available_phase_reflects_completion(theme, facade, tmp_path):
     browser.set_items([str(clip)])
     browser.select(0)
 
-    started = screen.run_first_available_phase()
+    # Caller specifies the phase explicitly.
+    started = screen.run_phase("analysis")
     assert started is True
     _pump_until(lambda: controller.is_phase_running() is False)
     assert screen._preview_status_badge.text() == "Done"
     controller.stop()
+
+
+def test_run_phase_without_controller_returns_false(theme):
+    screen = build_media_workspace_screen(theme)
+    assert screen.run_phase("analysis") is False
 
 
 def test_clear_selection_does_not_select_video(theme, facade, tmp_path):
