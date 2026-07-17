@@ -86,6 +86,32 @@ def facade(app, tmp_path):
     return ApplicationFacade(config, producers=object(), registry=_make_registry())
 
 
+class _FakeFrameService:
+    """Fake decode/metadata service returning tiny numpy BGR frames."""
+
+    def read_metadata(self, path):
+        return SimpleNamespace(width=4, height=4, fps=30.0, duration=10.0)
+
+    def extract_frame_at(self, path, timestamp):
+        import numpy as np
+
+        # A 4x4 BGR frame whose blue channel encodes the timestamp bucket.
+        frame = np.zeros((4, 4, 3), dtype=np.uint8)
+        frame[:, :, 0] = int(timestamp) % 256
+        return frame
+
+
+@pytest.fixture
+def frame_facade(app, tmp_path):
+    config = SimpleNamespace(paths=SimpleNamespace(output_dir=tmp_path))
+    return ApplicationFacade(
+        config,
+        producers=object(),
+        registry=_make_registry(),
+        frame_service=_FakeFrameService(),
+    )
+
+
 def _find(root, object_name):
     for child in root.findChildren(QWidget):
         if child.objectName() == object_name:
@@ -317,6 +343,46 @@ def test_run_phase_reflects_completion(theme, facade, tmp_path):
 def test_run_phase_without_controller_returns_false(theme):
     screen = build_media_workspace_screen(theme)
     assert screen.run_phase("analysis") is False
+
+
+def test_selection_displays_real_first_frame(theme, frame_facade, tmp_path):
+    clip = tmp_path / "clip_01.mp4"
+    clip.write_bytes(b"x")
+
+    controller = WorkflowController(frame_facade)
+    controller.start()
+    screen = build_media_workspace_screen(theme, controller)
+
+    browser = _browser(screen)
+    browser.set_items([str(clip)])
+    browser.select(0)
+
+    sink = _find(screen, "MediaWorkspacePreviewFrame")
+    assert sink is not None
+    assert sink.isVisible() is True
+    assert sink.pixmap() is not None and not sink.pixmap().isNull()
+    controller.stop()
+
+
+def test_playhead_change_decodes_frame(theme, frame_facade, tmp_path):
+    clip = tmp_path / "clip_01.mp4"
+    clip.write_bytes(b"x")
+
+    controller = WorkflowController(frame_facade)
+    controller.start()
+    screen = build_media_workspace_screen(theme, controller)
+
+    browser = _browser(screen)
+    browser.set_items([str(clip)])
+    browser.select(0)
+
+    timeline = _find(screen, "Timeline")
+    timeline.set_playhead(5.0)  # emits playhead_changed -> decode + display
+
+    sink = _find(screen, "MediaWorkspacePreviewFrame")
+    assert sink.isVisible() is True
+    assert not sink.pixmap().isNull()
+    controller.stop()
 
 
 def test_backend_timeline_reflected_into_widget(theme, facade, tmp_path):
