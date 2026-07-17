@@ -43,6 +43,8 @@ class Event(enum.Enum):
     VideoSelected = "video_selected"
     #: Persistent state: a setting changed.
     SettingsChanged = "settings_changed"
+    #: Persistent state: the timeline model changed.
+    TimelineChanged = "timeline_changed"
 
     #: Volatile: a phase started running.
     PhaseStarted = "phase_started"
@@ -60,7 +62,12 @@ class Event(enum.Enum):
 
 #: The persistent state events whose latest payload is cached for replay.
 REPLAYABLE_EVENTS: frozenset[Event] = frozenset(
-    {Event.ProjectLoaded, Event.VideoSelected, Event.SettingsChanged}
+    {
+        Event.ProjectLoaded,
+        Event.VideoSelected,
+        Event.SettingsChanged,
+        Event.TimelineChanged,
+    }
 )
 
 
