@@ -31,7 +31,8 @@ from gui.integration.workflow_controller import WorkflowController  # noqa: E402
 from gui.screens.media_workspace_screen import build_media_workspace_screen  # noqa: E402
 from gui.theme.manager import ThemeManager  # noqa: E402
 from gui.widgets import MediaBrowser, TransportBar  # noqa: E402
-from gui_core import ApplicationFacade  # noqa: E402
+from gui_core import ApplicationFacade, Timeline, Track  # noqa: E402
+from gui_core.timeline import Clip as TimelineClip  # noqa: E402
 from gui_core.artifacts import ArtifactKind  # noqa: E402
 from gui_core.commands import PhaseResult  # noqa: E402
 from gui_core.registry import (  # noqa: E402
@@ -316,6 +317,36 @@ def test_run_phase_reflects_completion(theme, facade, tmp_path):
 def test_run_phase_without_controller_returns_false(theme):
     screen = build_media_workspace_screen(theme)
     assert screen.run_phase("analysis") is False
+
+
+def test_backend_timeline_reflected_into_widget(theme, facade, tmp_path):
+    clip = tmp_path / "clip_01.mp4"
+    clip.write_bytes(b"x")
+
+    controller = WorkflowController(facade)
+    controller.start()
+    screen = build_media_workspace_screen(theme, controller)
+
+    backend_tl = (
+        Timeline(duration=90.0, tracks=(Track(index=0, name="V1"),))
+        .add_clip(TimelineClip(id="c1", track_index=0, start=0.0, length=10.0,
+                               label="Intro"))
+        .add_clip(TimelineClip(id="c2", track_index=0, start=10.0, length=20.0,
+                               label="Play"))
+    )
+    controller.update_timeline(backend_tl)
+
+    browser = _browser(screen)
+    browser.set_items([str(clip)])
+    browser.select(0)
+
+    widget = _find(screen, "Timeline")
+    assert widget is not None
+    assert widget.duration() == 90.0
+    assert widget.clip_count() == 2
+    starts = sorted(c["start"] for c in widget.clips())
+    assert starts == [0.0, 10.0]
+    controller.stop()
 
 
 class _WritingCommand:
