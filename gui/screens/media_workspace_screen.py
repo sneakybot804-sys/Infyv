@@ -1271,23 +1271,15 @@ class _MediaWorkspace(QWidget):
     # ------------------------------------------------------------------ #
     # Phase execution integration (observe + trigger; controller APIs only)
     # ------------------------------------------------------------------ #
-    def run_first_available_phase(self) -> bool:
-        """Run the first runnable phase for the selected video (screen helper).
+    def run_phase(self, phase_id: str) -> bool:
+        """Run an explicitly specified backend phase (screen helper).
 
-        Reuses the controller's existing read (``available_phases``) and
-        execution (``run_phase``) surface. Returns ``False`` when there is no
-        controller, no runnable phase, or a phase is already running (the
-        controller enforces single-flight). Adds no new public widget /
-        gui_core / controller API.
+        The caller chooses the target phase; the screen never selects backend
+        behavior implicitly. Forwards to the controller's existing
+        ``run_phase`` (which enforces single-flight and returns whether the
+        run started). Returns ``False`` when there is no controller.
         """
         if self._controller is None:
-            return False
-        phases = self._controller.available_phases()
-        if not phases:
-            self._set_phase_status("No phases")
-            return False
-        phase_id = getattr(phases[0], "id", None) or getattr(phases[0], "phase_id", None)
-        if phase_id is None:
             return False
         return self._controller.run_phase(phase_id)
 
