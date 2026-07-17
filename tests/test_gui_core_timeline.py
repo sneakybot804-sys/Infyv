@@ -161,3 +161,53 @@ def test_with_duration_revalidates():
     with pytest.raises(ValueError):
         tl.with_duration(10.0)
     assert tl.with_duration(120.0).duration == 120.0
+
+
+# ---------------------------------------------------------------------- #
+# Queries added in Milestone 2
+# ---------------------------------------------------------------------- #
+def test_count_and_duration_helpers():
+    tl = _base()
+    assert tl.is_empty() is True
+    assert tl.track_count() == 2
+    assert tl.clip_count() == 0
+    assert tl.marker_count() == 0
+    assert tl.duration_used() == 0.0
+
+    tl = tl.add_clip(Clip(id="a", track_index=0, start=0.0, length=12.0))
+    tl = tl.add_clip(Clip(id="b", track_index=1, start=5.0, length=20.0))
+    tl = tl.add_marker(Marker(id="m", time=3.0))
+    assert tl.is_empty() is False
+    assert tl.clip_count() == 2
+    assert tl.marker_count() == 1
+    assert tl.duration_used() == 25.0  # b: 5 + 20
+
+
+# ---------------------------------------------------------------------- #
+# Serialization (plain-dict round-trip)
+# ---------------------------------------------------------------------- #
+def test_value_type_roundtrip():
+    clip = Clip(id="c", track_index=1, start=2.0, length=3.0, source="g.mp4", label="L")
+    assert Clip.from_dict(clip.to_dict()) == clip
+    marker = Marker(id="m", time=4.0, label="beat", kind="beat")
+    assert Marker.from_dict(marker.to_dict()) == marker
+    track = Track(index=2, name="A2", kind="audio", enabled=False, locked=True)
+    assert Track.from_dict(track.to_dict()) == track
+
+
+def test_timeline_roundtrip():
+    tl = (
+        _base()
+        .add_clip(Clip(id="a", track_index=0, start=0.0, length=10.0))
+        .add_clip(Clip(id="b", track_index=1, start=0.0, length=8.0))
+        .add_marker(Marker(id="m", time=5.0, label="x"))
+    )
+    restored = Timeline.from_dict(tl.to_dict())
+    assert restored == tl
+
+
+def test_from_dict_validates():
+    bad = {"duration": 10.0, "clips": [{"id": "a", "track_index": 0,
+            "start": -1.0, "length": 2.0}], "tracks": [{"index": 0, "name": "V"}]}
+    with pytest.raises(ValueError):
+        Timeline.from_dict(bad)
