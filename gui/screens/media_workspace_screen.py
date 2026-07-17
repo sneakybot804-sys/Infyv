@@ -1261,7 +1261,7 @@ class _MediaWorkspace(QWidget):
         suffix = getattr(video_path, "suffix", "") or ""
         kind = suffix.lstrip(".").lower()
         self._detail_kind.set_text(f"Type: {kind}" if kind else "Type: \u2014")
-        self._detail_status.set_text(self._status_line(state))
+        self._detail_status.set_text(self._artifact_status(state))
 
         # Reset the transport DISPLAY for the new selection via public API
         # only. TransportBar stays the single playback-state owner.
@@ -1311,31 +1311,11 @@ class _MediaWorkspace(QWidget):
             state = self._controller.project_state()
         except Exception:
             return
-        self._detail_status.set_text(self._status_line(state))
+        self._detail_status.set_text(self._artifact_status(state))
 
     def _on_phase_failed(self, message: str) -> None:
         """Observer: a phase run raised; reflect the failure."""
         self._set_phase_status("Failed")
-
-    def _status_line(self, state) -> str:
-        """Compose the Details Status row from artifacts + runnable phases.
-
-        Reuses :meth:`_artifact_status` (artifact presence from ProjectState)
-        and, when a controller is available, appends the count of currently
-        runnable phases read from the controller's existing
-        ``available_phases`` API. No new widget/model; the existing Details
-        MetaLabel is the sole surface.
-        """
-        text = self._artifact_status(state)
-        if self._controller is None:
-            return text
-        try:
-            phases = self._controller.available_phases()
-        except Exception:
-            return text
-        n = len(phases)
-        noun = "phase" if n == 1 else "phases"
-        return f"{text} \u00b7 {n} {noun} runnable"
 
     @staticmethod
     def _artifact_status(state) -> str:
