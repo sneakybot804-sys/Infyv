@@ -36,7 +36,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QSplitter,
-    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -58,9 +57,6 @@ from gui.widgets.text_field import TextField
 from gui.widgets.timeline import Timeline
 from gui.widgets.toggle_switch import ToggleSwitch
 from gui.widgets.transport_bar import TransportBar
-
-# QScrollArea is imported lazily inside _build_details to keep the top-level
-# import block minimal; see the local import there.
 
 #: Static/demo media used to seed the browser (no filesystem access).
 _DEMO_ITEMS: List[str] = [
@@ -550,8 +546,6 @@ class _MediaWorkspace(QWidget):
         # A scrollable body of read-only metadata sections. The three frozen
         # detail MetaLabels (self._detail_name / _detail_kind / _detail_status)
         # remain the General section's rows, so selection wiring is unchanged.
-        from PySide6.QtWidgets import QScrollArea
-
         body = QScrollArea(details)
         body.setObjectName("MediaWorkspaceDetailsBody")
         body.setWidgetResizable(True)
@@ -754,8 +748,6 @@ class _MediaWorkspace(QWidget):
         stream.addLayout(header_row)
 
         # ---- Section 1: two-column AI tool card grid ---- #
-        from PySide6.QtWidgets import QGridLayout
-
         ai_grid = QGridLayout()
         ai_grid.setHorizontalSpacing(s.sm)
         ai_grid.setVerticalSpacing(s.sm)
