@@ -385,6 +385,65 @@ def test_playhead_change_decodes_frame(theme, frame_facade, tmp_path):
     controller.stop()
 
 
+class _WriteArtifactCommand:
+    """Fake command writing a canonical artifact so gating can advance."""
+
+    def __init__(self, phase_id, suffix):
+        self.phase_id = phase_id
+        self.name = phase_id
+        self._suffix = suffix
+
+    def execute(self, context):
+        video = context.video_path
+        stem = video.stem if video is not None else "clip_01"
+        (context.output_dir / f"{stem}{self._suffix}").write_text("{}")
+        return PhaseResult(phase_id=self.phase_id, success=True, message="ok")
+
+
+def _auto_edit_facade(tmp_path):
+    from gui_core.artifacts import ArtifactKind
+
+    registry = PluginRegistry()
+    registry.register(
+        PhaseDescriptor(
+            id="analysis", label="Analysis", category=PhaseCategory.ANALYSIS,
+            command_factory=lambda: _WriteArtifactCommand("analysis", "_analysis.json"),
+            dependencies=(), output_artifact=ArtifactKind.ANALYSIS,
+        )
+    )
+    registry.register(
+        PhaseDescriptor(
+            id="highlight", label="Highlight", category=PhaseCategory.ANALYSIS,
+            command_factory=lambda: _WriteArtifactCommand("highlight", "_highlight.json"),
+            dependencies=("analysis",), output_artifact=ArtifactKind.HIGHLIGHT,
+        )
+    )
+    config = SimpleNamespace(paths=SimpleNamespace(output_dir=tmp_path))
+    return ApplicationFacade(config, producers=object(), registry=registry)
+
+
+def test_auto_edit_sequences_pipeline(theme, tmp_path, app):
+    clip = tmp_path / "clip_01.mp4"
+    clip.write_bytes(b"x")
+
+    controller = WorkflowController(_auto_edit_facade(tmp_path))
+    controller.start()
+    screen = build_media_workspace_screen(theme, controller)
+
+    browser = _browser(screen)
+    browser.set_items([str(clip)])
+    browser.select(0)
+
+    assert screen.start_auto_edit() is True
+    _pump_until(
+        lambda: (tmp_path / "clip_01_highlight.json").exists()
+        and controller.is_phase_running() is False
+    )
+    assert (tmp_path / "clip_01_analysis.json").exists()
+    assert (tmp_path / "clip_01_highlight.json").exists()
+    controller.stop()
+
+
 def test_widget_edit_persists_to_backend_timeline(theme, facade, tmp_path):
     controller = WorkflowController(facade)
     controller.start()
