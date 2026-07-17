@@ -385,6 +385,28 @@ def test_playhead_change_decodes_frame(theme, frame_facade, tmp_path):
     controller.stop()
 
 
+def test_widget_edit_persists_to_backend_timeline(theme, facade, tmp_path):
+    controller = WorkflowController(facade)
+    controller.start()
+    screen = build_media_workspace_screen(theme, controller)
+
+    timeline = _find(screen, "Timeline")
+    # Two-track demo content exists by default; move the first clip to track 1.
+    timeline.set_clips(
+        [
+            {"track": 0, "start": 0.0, "length": 10.0, "label": "A"},
+            {"track": 1, "start": 0.0, "length": 10.0, "label": "B"},
+        ]
+    )
+    timeline.move_clip(0, 1)  # emits clip_moved -> persist to backend
+
+    backend = controller.timeline()
+    assert backend is not None
+    moved = backend.clip_by_id("clip_0")
+    assert moved is not None and moved.track_index == 1
+    controller.stop()
+
+
 def test_backend_timeline_reflected_into_widget(theme, facade, tmp_path):
     clip = tmp_path / "clip_01.mp4"
     clip.write_bytes(b"x")
