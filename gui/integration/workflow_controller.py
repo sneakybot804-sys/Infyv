@@ -199,6 +199,10 @@ class WorkflowController(QObject):
         """Decode one BGR frame at ``seconds`` via the facade (thin)."""
         return self._facade.decode_frame(path, seconds)
 
+    def extract_audio(self, path):
+        """Extract a playable audio track via the facade (thin)."""
+        return self._facade.extract_audio(path)
+
     # ------------------------------------------------------------------ #
     # Execution (background, single-flight)
     # ------------------------------------------------------------------ #

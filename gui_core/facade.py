@@ -125,6 +125,15 @@ class ApplicationFacade:
         """
         return self.frame_service().extract_frame_at(path, seconds)
 
+    def extract_audio(self, path: str | Path) -> Any:
+        """Extract a playable audio track via the existing FFmpegService.
+
+        Delegates to :meth:`FFmpegService.extract_audio` (writes an MP3 into
+        the configured output dir) and returns its path. Used by the UI audio
+        player for playback synchronization.
+        """
+        return self.frame_service().extract_audio(path)
+
     # ------------------------------------------------------------------ #
     # Phases (delegates to Pipeline / registry / runner)
     # ------------------------------------------------------------------ #
