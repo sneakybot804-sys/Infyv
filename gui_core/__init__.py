@@ -31,6 +31,7 @@ from gui_core.facade import ApplicationFacade
 from gui_core.logs import CoreLogger, LogLevel, LogRecord
 from gui_core.registry import PhaseCategory, PhaseId, PhasePlugin
 from gui_core.playback import PlaybackState
+from gui_core.sequence import Sequence, SequenceEntry
 from gui_core.state import ProjectState
 from gui_core.timeline import (
     Clip,
@@ -68,4 +69,6 @@ __all__ = [
     "EditDecision",
     "EditDecisionList",
     "PlaybackState",
+    "Sequence",
+    "SequenceEntry",
 ]
