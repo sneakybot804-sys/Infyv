@@ -31,7 +31,6 @@ from gui.integration.workflow_controller import WorkflowController  # noqa: E402
 from gui.screens.media_workspace_screen import build_media_workspace_screen  # noqa: E402
 from gui.theme.manager import ThemeManager  # noqa: E402
 from gui.widgets import MediaBrowser, TransportBar  # noqa: E402
-from gui.widgets.section_header import SectionHeader  # noqa: E402
 from gui_core import ApplicationFacade  # noqa: E402
 from gui_core.artifacts import ArtifactKind  # noqa: E402
 from gui_core.commands import PhaseResult  # noqa: E402
