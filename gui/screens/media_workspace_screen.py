@@ -214,6 +214,16 @@ class _MediaWorkspace(QWidget):
         # backend via _on_selection_changed (see below); otherwise it stays
         # UI-only. The single connection covers both modes.
         self._browser.selection_changed.connect(self._on_selection_changed)
+
+        # Phase-execution integration: observe the controller's phase
+        # lifecycle signals and reflect run state into the existing Preview
+        # HUD status label. Connected only when a controller is present, so
+        # UI-only construction is unaffected. Delivery is on the GUI thread
+        # (the controller uses queued connections for background outcomes).
+        if self._controller is not None:
+            self._controller.phase_started.connect(self._on_phase_started)
+            self._controller.phase_completed.connect(self._on_phase_completed)
+            self._controller.phase_failed.connect(self._on_phase_failed)
         self._timeline.clip_selected.connect(self._on_clip_selected)
         # A drag-move updates the clip model without re-emitting clip_selected,
         # so refresh the inspector on clip_moved to keep it in sync.
@@ -393,6 +403,11 @@ class _MediaWorkspace(QWidget):
             badge.setStyleSheet(
                 badge_qss.replace("{selector}", f"#{name}")
             )
+            # Keep a reference to the status badge so the phase-execution
+            # observer can reflect run state. Object name / style / layout
+            # are unchanged; only the text is updated later.
+            if name == "MediaWorkspacePreviewStatusBadge":
+                self._preview_status_badge = badge
             hud_row.addWidget(badge)
 
         stage_layout.addWidget(hud)
@@ -1252,6 +1267,48 @@ class _MediaWorkspace(QWidget):
         # only. TransportBar stays the single playback-state owner.
         self._transport.set_state("stopped")
         self._transport.set_position(0.0)
+
+    # ------------------------------------------------------------------ #
+    # Phase execution integration (observe + trigger; controller APIs only)
+    # ------------------------------------------------------------------ #
+    def run_first_available_phase(self) -> bool:
+        """Run the first runnable phase for the selected video (screen helper).
+
+        Reuses the controller's existing read (``available_phases``) and
+        execution (``run_phase``) surface. Returns ``False`` when there is no
+        controller, no runnable phase, or a phase is already running (the
+        controller enforces single-flight). Adds no new public widget /
+        gui_core / controller API.
+        """
+        if self._controller is None:
+            return False
+        phases = self._controller.available_phases()
+        if not phases:
+            self._set_phase_status("No phases")
+            return False
+        phase_id = getattr(phases[0], "id", None) or getattr(phases[0], "phase_id", None)
+        if phase_id is None:
+            return False
+        return self._controller.run_phase(phase_id)
+
+    def _set_phase_status(self, text: str) -> None:
+        """Reflect phase run state into the existing Preview HUD status label."""
+        badge = getattr(self, "_preview_status_badge", None)
+        if badge is not None:
+            badge.setText(text)
+
+    def _on_phase_started(self, phase_id: str) -> None:
+        """Observer: a background phase run began."""
+        self._set_phase_status(f"Running: {phase_id}")
+
+    def _on_phase_completed(self, result) -> None:
+        """Observer: a phase run finished; reflect success/failure."""
+        success = bool(getattr(result, "success", False))
+        self._set_phase_status("Done" if success else "Failed")
+
+    def _on_phase_failed(self, message: str) -> None:
+        """Observer: a phase run raised; reflect the failure."""
+        self._set_phase_status("Failed")
 
     @staticmethod
     def _artifact_status(state) -> str:
