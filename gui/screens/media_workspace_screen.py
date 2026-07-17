@@ -1294,9 +1294,24 @@ class _MediaWorkspace(QWidget):
         self._set_phase_status(f"Running: {phase_id}")
 
     def _on_phase_completed(self, result) -> None:
-        """Observer: a phase run finished; reflect success/failure."""
+        """Observer: a phase run finished; reflect success/failure + artifacts.
+
+        ``ApplicationFacade.run_phase`` refreshes discovered artifacts before
+        returning, so ``project_state().artifacts`` is authoritative here. Re-
+        read the state and refresh the existing Details Status row via the
+        existing formatter. ``artifact_created`` is not observed for this,
+        because its information is already represented by the refreshed
+        ``ProjectState.artifacts`` (avoiding a duplicate update).
+        """
         success = bool(getattr(result, "success", False))
         self._set_phase_status("Done" if success else "Failed")
+        if self._controller is None:
+            return
+        try:
+            state = self._controller.project_state()
+        except Exception:
+            return
+        self._detail_status.set_text(self._artifact_status(state))
 
     def _on_phase_failed(self, message: str) -> None:
         """Observer: a phase run raised; reflect the failure."""
