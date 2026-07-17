@@ -27,10 +27,19 @@ from gui_core.errors import (
     UnknownPhaseError,
 )
 from gui_core.events import Event, EventBus, EventMessage, EventPriority
+from gui_core.export import (
+    ExportFormat,
+    ExportPlan,
+    ExportSegment,
+    ExportSpec,
+    build_export_plan,
+)
 from gui_core.facade import ApplicationFacade
+from gui_core.log_stream import LogStream
 from gui_core.logs import CoreLogger, LogLevel, LogRecord
 from gui_core.registry import PhaseCategory, PhaseId, PhasePlugin
 from gui_core.playback import PlaybackState
+from gui_core.render_queue import RenderJob, RenderJobStatus, RenderQueue
 from gui_core.sequence import Sequence, SequenceEntry
 from gui_core.state import ProjectState
 from gui_core.timeline import (
@@ -71,4 +80,13 @@ __all__ = [
     "PlaybackState",
     "Sequence",
     "SequenceEntry",
+    "RenderJob",
+    "RenderJobStatus",
+    "RenderQueue",
+    "ExportSpec",
+    "ExportFormat",
+    "ExportSegment",
+    "ExportPlan",
+    "build_export_plan",
+    "LogStream",
 ]
