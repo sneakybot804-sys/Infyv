@@ -1257,18 +1257,15 @@ class _MediaWorkspace(QWidget):
     def _artifact_status(state) -> str:
         """Summarize ``ProjectState.artifacts`` for the existing Status row.
 
-        Uses only the real ``artifacts`` tuple already carried by the state
-        (each item's ``kind.value``); creates no new artifact widget.
+        Kept terse to match the existing UI ("Status: ready"). Reports only
+        real artifact presence derived directly from the state's ``artifacts``
+        tuple; creates no new artifact widget and adds no fabricated detail.
         """
-        artifacts = tuple(getattr(state, "artifacts", ()) or ())
-        if not artifacts:
-            return "Status: ready \u00b7 no artifacts"
-        kinds = ", ".join(
-            getattr(getattr(a, "kind", None), "value", str(a)) for a in artifacts
-        )
-        count = len(artifacts)
+        count = len(tuple(getattr(state, "artifacts", ()) or ()))
+        if count == 0:
+            return "Status: ready"
         noun = "artifact" if count == 1 else "artifacts"
-        return f"Status: ready \u00b7 {count} {noun} ({kinds})"
+        return f"Status: ready \u00b7 {count} {noun}"
 
     def _on_clip_selected(self, index: int) -> None:
         """Update the clip inspector from the timeline selection (UI-only).
