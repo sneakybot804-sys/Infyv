@@ -3,7 +3,14 @@ from __future__ import annotations
 
 import pytest
 
-from gui_core.timeline import Clip, Marker, Timeline, Track
+from gui_core.timeline import (
+    Clip,
+    EditDecision,
+    EditDecisionList,
+    Marker,
+    Timeline,
+    Track,
+)
 
 
 # ---------------------------------------------------------------------- #
@@ -211,3 +218,42 @@ def test_from_dict_validates():
             "start": -1.0, "length": 2.0}], "tracks": [{"index": 0, "name": "V"}]}
     with pytest.raises(ValueError):
         Timeline.from_dict(bad)
+
+
+# ---------------------------------------------------------------------- #
+# EDL projection
+# ---------------------------------------------------------------------- #
+def test_edl_empty():
+    edl = _base().to_edl()
+    assert isinstance(edl, EditDecisionList)
+    assert edl.is_empty() is True
+    assert edl.duration == 60.0
+
+
+def test_edl_orders_and_numbers_per_track():
+    tl = (
+        _base()
+        .add_clip(Clip(id="v2", track_index=0, start=20.0, length=5.0, source="g.mp4"))
+        .add_clip(Clip(id="v1", track_index=0, start=0.0, length=5.0, source="g.mp4"))
+        .add_clip(Clip(id="a1", track_index=1, start=0.0, length=32.0))
+    )
+    edl = tl.to_edl()
+    assert edl.is_empty() is False
+
+    track0 = edl.for_track(0)
+    assert [d.clip_id for d in track0] == ["v1", "v2"]
+    assert [d.index for d in track0] == [0, 1]
+    assert track0[0].timeline_in == 0.0 and track0[0].timeline_out == 5.0
+    assert track0[0].source == "g.mp4"
+
+    track1 = edl.for_track(1)
+    assert [d.clip_id for d in track1] == ["a1"]
+    assert track1[0].index == 0
+
+
+def test_edl_to_dict():
+    tl = _base().add_clip(Clip(id="v1", track_index=0, start=0.0, length=5.0))
+    data = tl.to_edl().to_dict()
+    assert data["duration"] == 60.0
+    assert len(data["decisions"]) == 1
+    assert data["decisions"][0]["clip_id"] == "v1"
