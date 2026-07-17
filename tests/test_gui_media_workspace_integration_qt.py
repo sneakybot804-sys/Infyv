@@ -257,6 +257,27 @@ def test_transport_display_resets_on_selection(theme, facade, tmp_path):
     controller.stop()
 
 
+def test_timeline_playhead_resets_on_selection(theme, facade, tmp_path):
+    clip = tmp_path / "clip_01.mp4"
+    clip.write_bytes(b"x")
+
+    controller = WorkflowController(facade)
+    controller.start()
+    screen = build_media_workspace_screen(theme, controller)
+
+    timeline = _find(screen, "Timeline")
+    assert timeline is not None
+    timeline.set_playhead(10.0)
+    assert timeline.playhead() == 10.0
+
+    browser = _browser(screen)
+    browser.set_items([str(clip)])
+    browser.select(0)
+
+    assert timeline.playhead() == 0.0
+    controller.stop()
+
+
 def test_clear_selection_resets_empty_state(theme, facade, tmp_path):
     clip = tmp_path / "clip_01.mp4"
     clip.write_bytes(b"x")
