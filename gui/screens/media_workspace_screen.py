@@ -1544,40 +1544,65 @@ class _MediaWorkspace(QWidget):
         """
         self._clip_inspector.show_clip(self._timeline.selected_clip())
 
-    def _persist_timeline_to_backend(self) -> None:
-        """Persist the Timeline widget's current model into the backend.
+    def _build_backend_timeline(self):
+        """Map the Timeline widget's current model into a gui_core.Timeline.
 
-        Maps the widget's tracks/clips into a validated gui_core.Timeline and
-        calls controller.update_timeline (publishing TimelineChanged), so the
-        backend ProjectState.timeline follows the widget edits. No-op without
-        a controller; best-effort on validation errors (an invalid transient
-        edit must never crash the UI thread).
+        The Timeline widget exposes no persistent clip identifier: its clip is
+        a plain dict (track/start/length/label) and the widget's own identity
+        for a clip is its positional index (used by select/move/trim). The
+        backend model requires unique clip ids, so ids are derived from that
+        same index (``clip_<i>``) -- mirroring the widget's existing identity
+        rather than inventing a separate id scheme.
+
+        May raise ValueError from backend Timeline/Clip validation (e.g. an
+        overlapping or out-of-bounds edit); callers handle that explicitly.
+        """
+        from gui_core import Timeline, Track
+        from gui_core.timeline import Clip as BackendClip
+
+        names = self._timeline.tracks()
+        tracks = tuple(Track(index=i, name=name) for i, name in enumerate(names))
+        backend = Timeline(duration=float(self._timeline.duration()), tracks=tracks)
+        for i, clip in enumerate(self._timeline.clips()):
+            backend = backend.add_clip(
+                BackendClip(
+                    id=f"clip_{i}",
+                    track_index=int(clip.get("track", 0)),
+                    start=float(clip.get("start", 0.0)),
+                    length=float(clip.get("length", 0.0)),
+                    label=str(clip.get("label", "")),
+                )
+            )
+        return backend
+
+    def _persist_timeline_to_backend(self) -> None:
+        """Persist the Timeline widget's model into the backend Timeline.
+
+        Maps the widget model to a validated gui_core.Timeline and calls
+        controller.update_timeline (publishing TimelineChanged). No-op without
+        a controller.
+
+        Validation failures are NOT silently ignored: a backend ValueError
+        (invalid edit) is surfaced in the Details status row so the user sees
+        the edit did not persist. The Qt thread is never crashed, but the
+        failure is reported rather than swallowed.
         """
         if self._controller is None:
             return
         try:
-            from gui_core import Timeline, Track
-            from gui_core.timeline import Clip as BackendClip
-
-            names = self._timeline.tracks()
-            tracks = tuple(
-                Track(index=i, name=name) for i, name in enumerate(names)
-            )
-            duration = float(self._timeline.duration())
-            backend = Timeline(duration=duration, tracks=tracks)
-            for i, clip in enumerate(self._timeline.clips()):
-                backend = backend.add_clip(
-                    BackendClip(
-                        id=f"clip_{i}",
-                        track_index=int(clip.get("track", 0)),
-                        start=float(clip.get("start", 0.0)),
-                        length=float(clip.get("length", 0.0)),
-                        label=str(clip.get("label", "")),
-                    )
-                )
-            self._controller.update_timeline(backend)
-        except Exception:
+            backend = self._build_backend_timeline()
+        except ValueError as exc:
+            # Invalid edit (e.g. overlap / out of bounds): surface it.
+            self._detail_status.set_text(f"Timeline: invalid edit \u2014 {exc}")
             return
+        self._controller.update_timeline(backend)
+        # Successful persist: restore the artifact-derived status.
+        try:
+            self._detail_status.set_text(
+                self._artifact_status(self._controller.project_state())
+            )
+        except Exception:
+            pass
 
     def _on_clip_moved(self, index: int, new_track: int) -> None:
         """Refresh the clip inspector after a timeline clip is moved (UI-only).
