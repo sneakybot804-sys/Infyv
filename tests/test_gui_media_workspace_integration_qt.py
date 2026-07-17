@@ -319,6 +319,60 @@ def test_run_phase_without_controller_returns_false(theme):
     assert screen.run_phase("analysis") is False
 
 
+class _WritingCommand:
+    """Fake command that writes the canonical analysis artifact then succeeds."""
+
+    phase_id = "analysis"
+    name = "Writing Analysis"
+
+    def execute(self, context) -> PhaseResult:
+        # Producers write "<stem>_analysis.json" into output_dir; mirror that so
+        # ArtifactResolver.discover finds it on refresh_artifacts().
+        video = context.video_path if hasattr(context, "video_path") else None
+        stem = video.stem if video is not None else "clip_01"
+        (context.output_dir / f"{stem}_analysis.json").write_text("{}")
+        return PhaseResult(phase_id=self.phase_id, success=True, message="ok")
+
+
+def _writing_facade(tmp_path):
+    registry = PluginRegistry()
+    registry.register(
+        PhaseDescriptor(
+            id="analysis",
+            label="Writing Analysis",
+            category=PhaseCategory.ANALYSIS,
+            command_factory=_WritingCommand,
+            dependencies=(),
+            output_artifact=ArtifactKind.ANALYSIS,
+        )
+    )
+    config = SimpleNamespace(paths=SimpleNamespace(output_dir=tmp_path))
+    return ApplicationFacade(config, producers=object(), registry=registry)
+
+
+def test_details_artifacts_refresh_after_phase(theme, tmp_path, app):
+    clip = tmp_path / "clip_01.mp4"
+    clip.write_bytes(b"x")
+
+    controller = WorkflowController(_writing_facade(tmp_path))
+    controller.start()
+    screen = build_media_workspace_screen(theme, controller)
+
+    browser = _browser(screen)
+    browser.set_items([str(clip)])
+    browser.select(0)
+    # No artifacts discovered at selection time.
+    assert _detail_status_text(screen) == "Status: ready"
+
+    assert screen.run_phase("analysis") is True
+    _pump_until(lambda: controller.is_phase_running() is False)
+
+    # After completion, ProjectState.artifacts is authoritative and the
+    # Details Status row reflects the newly discovered artifact.
+    assert len(controller.project_state().artifacts) == 1
+    assert _detail_status_text(screen) == "Status: ready \u00b7 1 artifact"
+
+
 def test_clear_selection_does_not_select_video(theme, facade, tmp_path):
     clip = tmp_path / "clip_01.mp4"
     clip.write_bytes(b"x")
