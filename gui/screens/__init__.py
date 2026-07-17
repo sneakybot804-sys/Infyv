@@ -8,5 +8,6 @@ by dependency injection, use composition only, and never import
 from __future__ import annotations
 
 from gui.screens.editor_screen import build_editor_screen
+from gui.screens.studio_screen import build_studio_screen
 
-__all__ = ["build_editor_screen"]
+__all__ = ["build_editor_screen", "build_studio_screen"]

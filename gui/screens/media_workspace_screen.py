@@ -113,11 +113,15 @@ class _MediaWorkspace(QWidget):
         )
 
         # MediaBrowser: fully constructed with all frozen APIs and signals
-        # intact. Kept detached from the splitter in the Milestone 2 layout
-        # so its zero-size hidden slot cannot corrupt the sidebar's geometry.
-        # A future milestone re-parents it into the workspace when the Media
-        # nav item is activated. selection_changed wiring below is unchanged.
+        # intact. Parented to the screen but hidden (the same pattern as the
+        # Details / Inspector / AI hosts below): it is intentionally NOT in
+        # the splitter, so its zero-size hidden slot can never corrupt the
+        # sidebar's geometry, yet as a proper child it remains discoverable
+        # via findChildren and its selection_changed wiring stays live. A
+        # future milestone surfaces it when the Media nav item is activated.
         self._browser = MediaBrowser(theme, items=list(_DEMO_ITEMS))
+        self._browser.setParent(self)
+        self._browser.setVisible(False)
         self._browser.setMinimumWidth(240)
         self._preview_header = SectionHeader(
             theme, "Preview", subtitle="No clip selected"
@@ -160,8 +164,9 @@ class _MediaWorkspace(QWidget):
 
         # Top editing area: sidebar | preview | right column.
         # The MediaBrowser is intentionally NOT added to this splitter in M2
-        # (see comment above); it remains a detached widget so its absence
-        # never creates an ambiguous zero-size slot that corrupts the sidebar.
+        # (see comment above); it remains a hidden child of the screen so its
+        # absence never creates an ambiguous zero-size slot that corrupts the
+        # sidebar.
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
         splitter.setObjectName("MediaWorkspaceSplitter")
         splitter.setChildrenCollapsible(False)
