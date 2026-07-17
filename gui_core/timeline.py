@@ -53,6 +53,25 @@ class Marker:
         if float(self.time) < 0.0:
             raise ValueError(f"Marker.time must be >= 0, got {self.time!r}.")
 
+    def to_dict(self) -> Dict[str, object]:
+        """Return a plain-dict representation (no framework types)."""
+        return {
+            "id": self.id,
+            "time": self.time,
+            "label": self.label,
+            "kind": self.kind,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, object]) -> "Marker":
+        """Build a validated :class:`Marker` from a plain dict."""
+        return cls(
+            id=str(data["id"]),
+            time=float(data["time"]),
+            label=str(data.get("label", "")),
+            kind=(None if data.get("kind") is None else str(data["kind"])),
+        )
+
 
 @dataclass(frozen=True)
 class Clip:
@@ -101,6 +120,29 @@ class Clip:
             return False
         return self.start < other.end and other.start < self.end
 
+    def to_dict(self) -> Dict[str, object]:
+        """Return a plain-dict representation (no framework types)."""
+        return {
+            "id": self.id,
+            "track_index": self.track_index,
+            "start": self.start,
+            "length": self.length,
+            "source": self.source,
+            "label": self.label,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, object]) -> "Clip":
+        """Build a validated :class:`Clip` from a plain dict."""
+        return cls(
+            id=str(data["id"]),
+            track_index=int(data["track_index"]),
+            start=float(data["start"]),
+            length=float(data["length"]),
+            source=(None if data.get("source") is None else str(data["source"])),
+            label=str(data.get("label", "")),
+        )
+
 
 @dataclass(frozen=True)
 class Track:
@@ -128,6 +170,27 @@ class Track:
                 f"Track.kind must be one of {sorted(TRACK_KINDS)}, "
                 f"got {self.kind!r}."
             )
+
+    def to_dict(self) -> Dict[str, object]:
+        """Return a plain-dict representation (no framework types)."""
+        return {
+            "index": self.index,
+            "name": self.name,
+            "kind": self.kind,
+            "enabled": self.enabled,
+            "locked": self.locked,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, object]) -> "Track":
+        """Build a validated :class:`Track` from a plain dict."""
+        return cls(
+            index=int(data["index"]),
+            name=str(data.get("name", "")),
+            kind=str(data.get("kind", "video")),
+            enabled=bool(data.get("enabled", True)),
+            locked=bool(data.get("locked", False)),
+        )
 
 
 @dataclass(frozen=True)
@@ -255,6 +318,48 @@ class Timeline:
     def sorted_markers(self) -> Tuple[Marker, ...]:
         """Return the markers ordered by ``time``."""
         return tuple(sorted(self.markers, key=lambda m: m.time))
+
+    def is_empty(self) -> bool:
+        """Return whether the timeline has no clips and no markers."""
+        return not self.clips and not self.markers
+
+    def track_count(self) -> int:
+        """Return the number of tracks."""
+        return len(self.tracks)
+
+    def clip_count(self) -> int:
+        """Return the number of clips."""
+        return len(self.clips)
+
+    def marker_count(self) -> int:
+        """Return the number of markers."""
+        return len(self.markers)
+
+    def duration_used(self) -> float:
+        """Return the max clip end time (``0.0`` when there are no clips)."""
+        return max((c.end for c in self.clips), default=0.0)
+
+    # ------------------------------------------------------------------ #
+    # Serialization (plain dicts; no persistence/file-format decision)
+    # ------------------------------------------------------------------ #
+    def to_dict(self) -> Dict[str, object]:
+        """Return a plain-dict representation of the whole timeline."""
+        return {
+            "duration": self.duration,
+            "tracks": [t.to_dict() for t in self.tracks],
+            "clips": [c.to_dict() for c in self.clips],
+            "markers": [m.to_dict() for m in self.markers],
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, object]) -> "Timeline":
+        """Build a validated :class:`Timeline` from a plain dict."""
+        return cls(
+            duration=float(data["duration"]),
+            tracks=tuple(Track.from_dict(t) for t in data.get("tracks", ())),
+            clips=tuple(Clip.from_dict(c) for c in data.get("clips", ())),
+            markers=tuple(Marker.from_dict(m) for m in data.get("markers", ())),
+        )
 
     # ------------------------------------------------------------------ #
     # Transformations (pure; return a new validated Timeline)
