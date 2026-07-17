@@ -25,6 +25,7 @@ from gui_core.producers import DefaultProducerFactories
 from gui_core.registry import PhasePlugin, PluginRegistry, register_builtins
 from gui_core.runner import PhaseRunner
 from gui_core.state import ProjectState, StateStore
+from gui_core.timeline import Timeline
 
 
 class ApplicationFacade:
@@ -81,6 +82,14 @@ class ApplicationFacade:
     def project_state(self) -> ProjectState:
         """Return the current immutable :class:`ProjectState` snapshot."""
         return self._store.state
+
+    def timeline(self) -> Optional[Timeline]:
+        """Return the current immutable timeline, or ``None`` if unset."""
+        return self._store.state.timeline
+
+    def update_timeline(self, timeline: Timeline) -> ProjectState:
+        """Replace the timeline and publish ``TimelineChanged``."""
+        return self._store.update_timeline(timeline)
 
     # ------------------------------------------------------------------ #
     # Phases (delegates to Pipeline / registry / runner)
