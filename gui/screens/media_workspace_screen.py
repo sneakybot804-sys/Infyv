@@ -1265,6 +1265,51 @@ class _MediaWorkspace(QWidget):
         self._transport.set_state("stopped")
         self._transport.set_position(0.0)
 
+        # Reflect the authoritative backend Timeline (if any) into the
+        # existing Timeline widget via its public API only.
+        self._reflect_timeline()
+
+    def _reflect_timeline(self) -> None:
+        """Reflect the backend Timeline into the existing Timeline widget.
+
+        Observer-only: reads ``controller.timeline()`` and maps it into the
+        frozen Timeline widget through its existing public API
+        (``set_duration`` / ``add_track`` / ``set_clips``). The backend
+        ``ProjectState.timeline`` remains the single source of truth; the
+        widget stores only view state. When there is no controller or no
+        backend timeline, the widget's current (demo) content is left
+        untouched -- no backend data is fabricated.
+
+        Markers are not reflected: the Timeline widget exposes no marker API,
+        and adding one would redesign a reusable widget (out of scope).
+        """
+        if self._controller is None:
+            return
+        try:
+            timeline = self._controller.timeline()
+        except Exception:
+            return
+        if timeline is None:
+            return
+        # Duration first so clip bounds validate against the new span.
+        self._timeline.set_duration(timeline.duration)
+        # Extend widget tracks to cover the backend track indices (never
+        # remove existing lanes; the widget owns its lane view state).
+        needed = max((t.index for t in timeline.tracks), default=-1) + 1
+        while self._timeline.track_count() < needed:
+            self._timeline.add_track(f"Track {self._timeline.track_count() + 1}")
+        self._timeline.set_clips(
+            [
+                {
+                    "track": clip.track_index,
+                    "start": clip.start,
+                    "length": clip.length,
+                    "label": clip.label or (clip.source or ""),
+                }
+                for clip in timeline.clips
+            ]
+        )
+
     # ------------------------------------------------------------------ #
     # Phase execution integration (observe + trigger; controller APIs only)
     # ------------------------------------------------------------------ #
