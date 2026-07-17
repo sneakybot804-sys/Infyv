@@ -24,6 +24,7 @@ pytest.importorskip("PySide6")
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import QEventLoop, QTimer  # noqa: E402
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
 from gui.integration.workflow_controller import WorkflowController  # noqa: E402
@@ -109,6 +110,23 @@ def _transport(screen) -> TransportBar:
     bar = _find(screen, "TransportBar")
     assert isinstance(bar, TransportBar)
     return bar
+
+
+def _pump_until(predicate, timeout_ms=2000):
+    """Spin the Qt event loop until ``predicate`` is true or timeout elapses."""
+    loop = QEventLoop()
+    timer = QTimer()
+    timer.setInterval(10)
+    timer.timeout.connect(lambda: loop.quit() if predicate() else None)
+    timer.start()
+    guard = QTimer()
+    guard.setSingleShot(True)
+    guard.timeout.connect(loop.quit)
+    guard.start(timeout_ms)
+    if not predicate():
+        loop.exec()
+    timer.stop()
+    guard.stop()
 
 
 def _detail_status_text(screen) -> str:
@@ -273,6 +291,36 @@ def test_clear_selection_resets_empty_state(theme, facade, tmp_path):
     browser.select(-1)
     # Every Preview-owned surface returns to the frozen empty state.
     assert _label_text(screen, "MediaWorkspacePreviewPlaceholder") == "No clip selected"
+    controller.stop()
+
+
+def test_run_first_available_phase_without_video(theme, facade):
+    controller = WorkflowController(facade)
+    controller.start()
+    screen = build_media_workspace_screen(theme, controller)
+
+    # No video selected -> no runnable phase.
+    assert screen.run_first_available_phase() is False
+    assert screen._preview_status_badge.text() == "No phases"
+    controller.stop()
+
+
+def test_run_first_available_phase_reflects_completion(theme, facade, tmp_path):
+    clip = tmp_path / "clip_01.mp4"
+    clip.write_bytes(b"x")
+
+    controller = WorkflowController(facade)
+    controller.start()
+    screen = build_media_workspace_screen(theme, controller)
+
+    browser = _browser(screen)
+    browser.set_items([str(clip)])
+    browser.select(0)
+
+    started = screen.run_first_available_phase()
+    assert started is True
+    _pump_until(lambda: controller.is_phase_running() is False)
+    assert screen._preview_status_badge.text() == "Done"
     controller.stop()
 
 
