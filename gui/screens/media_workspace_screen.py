@@ -100,6 +100,9 @@ class _MediaWorkspace(QWidget):
         self._audio_player = None
         self._audio_output = None
         self._audio_loaded_for = None
+        # Auto Edit sequencing state (over the existing gated pipeline).
+        self._auto_edit_active = False
+        self._auto_edit_attempted = set()
         self.setObjectName("MediaWorkspaceScreen")
         self.setWindowTitle("AI Gaming Video Editor \u2014 Media")
 
@@ -1488,6 +1491,39 @@ class _MediaWorkspace(QWidget):
             return False
         return self._controller.run_phase(phase_id)
 
+    # ------------------------------------------------------------------ #
+    # Auto Edit: sequence the existing pipeline (order owned by gui_core)
+    # ------------------------------------------------------------------ #
+    def start_auto_edit(self) -> bool:
+        """Run the AI pipeline end to end using the existing gating pipeline.
+
+        Reuses controller.available_phases() (pipeline/registry order) to pick
+        the next runnable phase and controller.run_phase() to execute it. The
+        sequence advances on each phase_completed by re-querying availability,
+        so ordering/gating stays owned by gui_core.Pipeline. Returns whether a
+        first phase was started.
+        """
+        if self._controller is None:
+            return False
+        self._auto_edit_active = True
+        self._auto_edit_attempted = set()
+        return self._run_next_auto_phase()
+
+    def _run_next_auto_phase(self) -> bool:
+        """Run the next not-yet-attempted runnable phase; stop when none left."""
+        if self._controller is None or not self._auto_edit_active:
+            return False
+        for plugin in self._controller.available_phases():
+            phase_id = getattr(plugin, "id", None)
+            if phase_id is None or phase_id in self._auto_edit_attempted:
+                continue
+            self._auto_edit_attempted.add(phase_id)
+            if self._controller.run_phase(phase_id):
+                return True
+        # Nothing new to run: the pipeline is complete for now.
+        self._auto_edit_active = False
+        return False
+
     def _set_phase_status(self, text: str) -> None:
         """Reflect phase run state into the existing Preview HUD status label."""
         badge = getattr(self, "_preview_status_badge", None)
@@ -1517,6 +1553,13 @@ class _MediaWorkspace(QWidget):
         except Exception:
             return
         self._detail_status.set_text(self._artifact_status(state))
+        # Auto Edit: advance to the next runnable phase on success; stop on
+        # failure. Availability is re-queried so order stays pipeline-owned.
+        if self._auto_edit_active:
+            if success:
+                self._run_next_auto_phase()
+            else:
+                self._auto_edit_active = False
 
     def _on_phase_failed(self, message: str) -> None:
         """Observer: a phase run raised; reflect the failure."""
