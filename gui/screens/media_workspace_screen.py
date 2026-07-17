@@ -452,6 +452,18 @@ class _MediaWorkspace(QWidget):
         self._preview_placeholder = placeholder
         stage_layout.addWidget(placeholder)
 
+        # Frame sink: a minimal image surface for decoded playback frames.
+        # Hidden until show_frame() is called; stacked with the placeholder
+        # inside the existing stage (no layout redesign, additive only).
+        self._preview_frame = QLabel(stage)
+        self._preview_frame.setObjectName("MediaWorkspacePreviewFrame")
+        self._preview_frame.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._preview_frame.setStyleSheet(
+            "#MediaWorkspacePreviewFrame { background: transparent; }"
+        )
+        self._preview_frame.setVisible(False)
+        stage_layout.addWidget(self._preview_frame, 1)
+
         hint = QLabel("Select a clip to preview", stage)
         hint.setObjectName("MediaWorkspacePreviewHint")
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
