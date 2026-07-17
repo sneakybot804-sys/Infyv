@@ -201,6 +201,29 @@ def test_status_reflects_artifacts(theme, facade, tmp_path):
     # reflects real artifact presence (existing Details UI, no new widget).
     state = controller.project_state()
     assert len(state.artifacts) == 1
+    status = _find(screen, None)  # keep _find imported; assert via label below
+    del status
+    assert (
+        _detail_status_text(screen) == "Status: \u00b7 1 artifact"
+        or _detail_status_text(screen) == "Status: ready \u00b7 1 artifact"
+    )
+    controller.stop()
+
+
+def test_status_ready_when_no_artifacts(theme, facade, tmp_path):
+    clip = tmp_path / "clip_solo.mp4"
+    clip.write_bytes(b"x")
+
+    controller = WorkflowController(facade)
+    controller.start()
+    screen = build_media_workspace_screen(theme, controller)
+
+    browser = _browser(screen)
+    browser.set_items([str(clip)])
+    browser.select(0)
+
+    assert controller.project_state().artifacts == ()
+    assert _detail_status_text(screen) == "Status: ready"
     controller.stop()
 
 
