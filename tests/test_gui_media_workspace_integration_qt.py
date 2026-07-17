@@ -231,7 +231,7 @@ def test_status_reflects_artifacts(theme, facade, tmp_path):
     # reflects real artifact presence (existing Details UI, no new widget).
     state = controller.project_state()
     assert len(state.artifacts) == 1
-    assert _detail_status_text(screen).startswith("Status: ready \u00b7 1 artifact")
+    assert _detail_status_text(screen) == "Status: ready \u00b7 1 artifact"
     controller.stop()
 
 
@@ -248,10 +248,7 @@ def test_status_ready_when_no_artifacts(theme, facade, tmp_path):
     browser.select(0)
 
     assert controller.project_state().artifacts == ()
-    status = _detail_status_text(screen)
-    assert status.startswith("Status: ready")
-    # Runnable-phase count is appended (available-phases integration).
-    assert "runnable" in status
+    assert _detail_status_text(screen) == "Status: ready"
     controller.stop()
 
 
@@ -365,7 +362,7 @@ def test_details_artifacts_refresh_after_phase(theme, tmp_path, app):
     browser.set_items([str(clip)])
     browser.select(0)
     # No artifacts discovered at selection time.
-    assert _detail_status_text(screen).startswith("Status: ready")
+    assert _detail_status_text(screen) == "Status: ready"
 
     assert screen.run_phase("analysis") is True
     _pump_until(lambda: controller.is_phase_running() is False)
@@ -373,7 +370,7 @@ def test_details_artifacts_refresh_after_phase(theme, tmp_path, app):
     # After completion, ProjectState.artifacts is authoritative and the
     # Details Status row reflects the newly discovered artifact.
     assert len(controller.project_state().artifacts) == 1
-    assert _detail_status_text(screen).startswith("Status: ready \u00b7 1 artifact")
+    assert _detail_status_text(screen) == "Status: ready \u00b7 1 artifact"
 
 
 def test_clear_selection_does_not_select_video(theme, facade, tmp_path):
