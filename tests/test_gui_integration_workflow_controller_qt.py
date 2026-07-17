@@ -117,6 +117,21 @@ def test_write_delegation(facade, tmp_path):
     assert controller.settings().get("quality") == "1080p"
 
 
+def test_timeline_delegation(facade):
+    from gui_core import Timeline, Track
+    from gui_core.timeline import Clip as TimelineClip
+
+    controller = WorkflowController(facade)
+    assert controller.timeline() is None
+
+    tl = Timeline(duration=45.0, tracks=(Track(index=0, name="V1"),)).add_clip(
+        TimelineClip(id="c1", track_index=0, start=0.0, length=5.0)
+    )
+    controller.update_timeline(tl)
+    assert controller.timeline() == tl
+    assert controller.project_state().timeline == tl
+
+
 def test_run_phase_success_emits_completed(facade, tmp_path):
     controller = WorkflowController(facade)
     controller.start()
