@@ -91,6 +91,10 @@ class _MediaWorkspace(QWidget):
         # Optional backend surface. None keeps the screen UI-only; when set it
         # is the single interactive write/read surface (WorkflowController).
         self._controller = controller
+        # Selected media path for real playback frame decoding (None until a
+        # backend video selection resolves). Decoding is owned by the backend
+        # FFmpegService via the controller; the screen only requests frames.
+        self._media_path = None
         self.setObjectName("MediaWorkspaceScreen")
         self.setWindowTitle("AI Gaming Video Editor \u2014 Media")
 
@@ -1216,6 +1220,60 @@ class _MediaWorkspace(QWidget):
         self._detail_kind.set_text("Type: \u2014")
         self._detail_status.set_text("Status: no selection")
 
+    # ------------------------------------------------------------------ #
+    # Real playback frame pipeline (decode via FFmpegService; display here)
+    # ------------------------------------------------------------------ #
+    def _decode_and_show(self, seconds: float) -> None:
+        """Decode the frame at ``seconds`` via the backend and display it.
+
+        Best-effort: requires a controller and a selected media path. Decoding
+        is owned by the backend FFmpegService (via the controller); any decode
+        failure is swallowed so playback/seek never crashes the UI thread.
+        """
+        if self._controller is None or self._media_path is None:
+            return
+        try:
+            frame = self._controller.decode_frame(self._media_path, seconds)
+        except Exception:
+            return
+        if frame is not None:
+            self.show_frame(frame)
+
+    def show_frame(self, bgr) -> None:
+        """Display a decoded ``(H, W, 3)`` uint8 BGR ndarray in the preview.
+
+        Converts BGR -> RGB, wraps as a QImage/QPixmap and shows it in the
+        frame sink, hiding the empty-state placeholder while a frame is shown.
+        Silently ignores malformed frames.
+        """
+        try:
+            height, width = int(bgr.shape[0]), int(bgr.shape[1])
+            if height <= 0 or width <= 0:
+                return
+            rgb = bgr[:, :, ::-1]  # BGR -> RGB
+            buffer = rgb.tobytes()
+            image = QImage(buffer, width, height, 3 * width, QImage.Format.Format_RGB888)
+            # Copy so the QImage does not alias the temporary buffer.
+            pixmap = QPixmap.fromImage(image.copy())
+        except Exception:
+            return
+        target = self._preview_frame.size()
+        if target.width() > 0 and target.height() > 0:
+            pixmap = pixmap.scaled(
+                target,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        self._preview_placeholder.setVisible(False)
+        self._preview_frame.setPixmap(pixmap)
+        self._preview_frame.setVisible(True)
+
+    def clear_frame(self) -> None:
+        """Hide the frame sink and restore the empty-state placeholder."""
+        self._preview_frame.clear()
+        self._preview_frame.setVisible(False)
+        self._preview_placeholder.setVisible(True)
+
     def _reflect_selected_video(self, item: str) -> None:
         """Drive ``select_video`` and reflect the controller's ProjectState.
 
@@ -1258,6 +1316,8 @@ class _MediaWorkspace(QWidget):
         """
         video_path = getattr(state, "video_path", None)
         if video_path is None:
+            self._media_path = None
+            self.clear_frame()
             self._show_empty_preview()
             return
 
@@ -1265,6 +1325,10 @@ class _MediaWorkspace(QWidget):
         display = getattr(video_path, "name", None) or fallback_name
         self._preview_header.set_subtitle(display)
         self._preview_placeholder.setText(display)
+
+        # Record the media path and show the first real frame (t=0).
+        self._media_path = video_path
+        self._decode_and_show(0.0)
 
         # Details metadata derived directly from ProjectState (no fabrication).
         self._detail_name.set_text(f"Name: {display}")
@@ -1425,6 +1489,10 @@ class _MediaWorkspace(QWidget):
         duration = self._timeline.duration()
         fraction = seconds / duration if duration > 0 else 0.0
         self._transport.set_position(fraction)
+        # Real playback: decode and display the frame at the new playhead. The
+        # Timeline widget's own timer drives playhead_changed as playback
+        # advances, so this reuses the existing timer (no second owner).
+        self._decode_and_show(seconds)
 
 
 class _StreamAccordion(QWidget):
