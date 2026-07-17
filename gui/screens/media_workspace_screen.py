@@ -1524,6 +1524,22 @@ class _MediaWorkspace(QWidget):
         self._auto_edit_active = False
         return False
 
+    def export(self) -> bool:
+        """Render/export the current project via the existing 'render' phase.
+
+        Reuses the frozen render pipeline (VideoEditor + FFmpegService) through
+        WorkflowController.run_phase("render"); real FFmpeg rendering and its
+        artifact/lifecycle events are produced by the existing backend. The
+        render phase is gated by the pipeline (it requires the decision/edit
+        plan artifact), so this returns False when render is not currently
+        runnable, when there is no controller, or when a phase is already
+        running. Progress/completion surface through the existing phase
+        observers.
+        """
+        if self._controller is None:
+            return False
+        return self._controller.run_phase("render")
+
     def _set_phase_status(self, text: str) -> None:
         """Reflect phase run state into the existing Preview HUD status label."""
         badge = getattr(self, "_preview_status_badge", None)
