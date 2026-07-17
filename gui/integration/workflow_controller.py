@@ -39,6 +39,7 @@ from gui_core import (
     PhasePlugin,
     PhaseResult,
     ProjectState,
+    Timeline,
 )
 from gui_core.logs import LogLevel
 
@@ -181,6 +182,14 @@ class WorkflowController(QObject):
     def set_setting(self, key: str, value: object) -> ProjectState:
         """Update a single setting via the facade."""
         return self._facade.update_settings(key, value)
+
+    def timeline(self) -> Optional[Timeline]:
+        """Return the current immutable timeline, or ``None`` if unset."""
+        return self._facade.timeline()
+
+    def update_timeline(self, timeline: Timeline) -> ProjectState:
+        """Replace the timeline via the facade (publishes TimelineChanged)."""
+        return self._facade.update_timeline(timeline)
 
     # ------------------------------------------------------------------ #
     # Execution (background, single-flight)
