@@ -37,6 +37,7 @@ class ApplicationFacade:
         *,
         producers: Optional[Any] = None,
         registry: Optional[PluginRegistry] = None,
+        frame_service: Optional[Any] = None,
     ) -> None:
         """Build and wire the core services by composition.
 
@@ -50,6 +51,10 @@ class ApplicationFacade:
         self._config = app_config
         self._bus = EventBus()
         self._logger = CoreLogger("facade", self._bus)
+        # Decoding/metadata service. Reuses the existing FFmpegService; built
+        # lazily on first use so importing gui_core never imports ffmpeg/numpy
+        # and tests can inject a fake via `frame_service`.
+        self._frame_service = frame_service
 
         self._registry = registry or PluginRegistry()
         if registry is None:
@@ -90,6 +95,35 @@ class ApplicationFacade:
     def update_timeline(self, timeline: Timeline) -> ProjectState:
         """Replace the timeline and publish ``TimelineChanged``."""
         return self._store.update_timeline(timeline)
+
+    # ------------------------------------------------------------------ #
+    # Decoding / preview frames (reuses the existing FFmpegService)
+    # ------------------------------------------------------------------ #
+    def frame_service(self) -> Any:
+        """Return the decode/metadata service, building it lazily.
+
+        Reuses the existing :class:`FFmpegService` (ffmpeg-python/numpy;
+        Qt-free). Imported lazily so importing ``gui_core`` never imports
+        ffmpeg/numpy. Tests may inject a fake via the constructor.
+        """
+        if self._frame_service is None:
+            from ffmpeg_service import FFmpegService
+
+            self._frame_service = FFmpegService(self._config)
+        return self._frame_service
+
+    def media_metadata(self, path: str | Path) -> Any:
+        """Return media metadata via the existing FFmpegService."""
+        return self.frame_service().read_metadata(path)
+
+    def decode_frame(self, path: str | Path, seconds: float) -> Any:
+        """Decode a single frame at ``seconds`` via the existing FFmpegService.
+
+        Returns the ``(H, W, 3)`` uint8 BGR ndarray produced by
+        :meth:`FFmpegService.extract_frame_at`. The UI converts it to a Qt
+        image; ``gui_core`` performs no Qt work.
+        """
+        return self.frame_service().extract_frame_at(path, seconds)
 
     # ------------------------------------------------------------------ #
     # Phases (delegates to Pipeline / registry / runner)
