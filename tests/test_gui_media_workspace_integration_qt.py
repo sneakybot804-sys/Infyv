@@ -178,7 +178,6 @@ def test_preview_placeholder_and_type_reflect_project_state(theme, facade, tmp_p
     # Placeholder reflects the selected media name (observed from video_path).
     assert _label_text(screen, "MediaWorkspacePreviewPlaceholder") == "clip_01.mp4"
     # Details "Type" is derived from the video_path suffix (no fabrication).
-    detail_kind = _find(screen, None)  # noqa: F841 - keep _find referenced
     assert controller.project_state().video_path.suffix == ".mp4"
     controller.stop()
 
