@@ -89,7 +89,7 @@ def test_timeline_rejects_overlapping_clips():
         tl.add_clip(Clip(id="b", track_index=0, start=5.0, length=10.0))
     # Non-overlapping on the same track is fine.
     ok = tl.add_clip(Clip(id="b", track_index=0, start=10.0, length=5.0))
-    assert ok.clip_count() if hasattr(ok, "clip_count") else len(ok.clips) == 2
+    assert len(ok.clips) == 2
 
 
 def test_timeline_rejects_duplicate_clip_ids():
