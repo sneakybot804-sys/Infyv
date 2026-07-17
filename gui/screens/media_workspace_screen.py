@@ -6,9 +6,16 @@ screen. Layout: a left :class:`MediaBrowser`, a center preview surface with a
 :class:`TransportBar`, and a right static details / metadata panel for the
 selected media.
 
-Interaction is UI-only: selecting a media item updates the preview subtitle and
-the details panel text. There is no timeline editing, AI logic, export
-pipeline, real playback, or backend; :mod:`gui_core` is never touched.
+Interaction is UI-only by default: selecting a media item updates the preview
+subtitle and the details panel text. There is no timeline editing, AI logic,
+export pipeline or real playback.
+
+Backend integration is optional and lives in this screen (the sole owner of
+the MediaBrowser). When a :class:`~gui.integration.workflow_controller.
+WorkflowController` is injected, the browser's ``selection_changed`` drives
+``controller.select_video`` and the screen reflects the authoritative
+``ProjectState`` read back from the controller. When no controller is given
+the screen stays purely UI-only and never touches :mod:`gui_core`.
 
 Stable object names for later integration and tests:
 
@@ -69,11 +76,24 @@ class _MediaWorkspace(QWidget):
     Kept private; :func:`build_media_workspace_screen` is the only public
     entry point. Holds references to the child widgets it must update on
     selection so the wiring stays within the screen (UI-only state).
+
+    Args:
+        theme: Injected theme manager (sole source of visual values).
+        controller: Optional interactive workflow controller. When provided,
+            the screen becomes the integration point that owns its
+            MediaBrowser: browser selection drives ``select_video`` and the
+            screen reflects the ``ProjectState`` read back from the controller.
+            When ``None`` the screen stays purely UI-only (``gui_core`` is
+            never touched), preserving the original behavior for every
+            existing caller and test.
     """
 
-    def __init__(self, theme: ThemeManager) -> None:
+    def __init__(self, theme: ThemeManager, controller=None) -> None:
         super().__init__()
         self._theme = theme
+        # Optional backend surface. None keeps the screen UI-only; when set it
+        # is the single interactive write/read surface (WorkflowController).
+        self._controller = controller
         self.setObjectName("MediaWorkspaceScreen")
         self.setWindowTitle("AI Gaming Video Editor \u2014 Media")
 
@@ -188,8 +208,11 @@ class _MediaWorkspace(QWidget):
         main_split.setSizes([620, 300])
         root.addWidget(main_split, 1)
 
-        # Screen-level, UI-only wiring: media selection updates preview +
-        # details; timeline clip selection updates the clip inspector.
+        # Screen-level wiring: media selection updates preview + details;
+        # timeline clip selection updates the clip inspector. When a
+        # WorkflowController is injected, selection additionally drives the
+        # backend via _on_selection_changed (see below); otherwise it stays
+        # UI-only. The single connection covers both modes.
         self._browser.selection_changed.connect(self._on_selection_changed)
         self._timeline.clip_selected.connect(self._on_clip_selected)
         # A drag-move updates the clip model without re-emitting clip_selected,
@@ -1123,8 +1146,15 @@ class _MediaWorkspace(QWidget):
     def _on_selection_changed(self, index: int) -> None:
         """Update the preview subtitle and details from the selection.
 
-        UI-only: reflects the browser's current item. A cleared selection
-        (``index == -1``) resets to the empty state. No media is opened.
+        Reflects the browser's current item. A cleared selection
+        (``index == -1``) resets to the empty state; no media is opened.
+
+        When a :class:`WorkflowController` is injected this is also the
+        integration point: the selected item is pushed to the backend via
+        ``controller.select_video`` and the authoritative ``ProjectState`` is
+        read back and reflected in the UI. With no controller the method is
+        pure UI (the original behavior), so every existing caller/test is
+        unaffected.
         """
         item = self._browser.current_item()
         if item is None:
@@ -1133,8 +1163,44 @@ class _MediaWorkspace(QWidget):
             self._detail_kind.set_text("Type: \u2014")
             self._detail_status.set_text("Status: no selection")
             return
-        self._preview_header.set_subtitle(item)
-        self._detail_name.set_text(f"Name: {item}")
+
+        # UI-only path (no backend): reflect the browser item directly.
+        if self._controller is None:
+            self._preview_header.set_subtitle(item)
+            self._detail_name.set_text(f"Name: {item}")
+            self._detail_kind.set_text("Type: video/mp4")
+            self._detail_status.set_text("Status: ready")
+            return
+
+        # Integration path: push the selection to the backend, then reflect
+        # the authoritative ProjectState read back from the controller. A
+        # failed select_video (e.g. a missing path) must never crash the UI
+        # thread, so it degrades to an explicit error state.
+        self._reflect_selected_video(item)
+
+    def _reflect_selected_video(self, item: str) -> None:
+        """Drive ``select_video`` and reflect the controller's ProjectState.
+
+        Integration-only helper (called when a WorkflowController is present).
+        Reuses the controller's existing write (``select_video``) and read
+        (``project_state``) surface; it invents no new backend API and mutates
+        no frozen component. The displayed name prefers the backend's
+        ``video_path`` so the UI always shows what the backend actually holds.
+        """
+        try:
+            self._controller.select_video(item)
+            state = self._controller.project_state()
+        except Exception as exc:  # backend rejected the selection
+            self._preview_header.set_subtitle(item)
+            self._detail_name.set_text(f"Name: {item}")
+            self._detail_kind.set_text("Type: video/mp4")
+            self._detail_status.set_text(f"Status: error \u2014 {exc}")
+            return
+
+        video_path = getattr(state, "video_path", None)
+        display = video_path.name if video_path is not None else item
+        self._preview_header.set_subtitle(display)
+        self._detail_name.set_text(f"Name: {display}")
         self._detail_kind.set_text("Type: video/mp4")
         self._detail_status.set_text("Status: ready")
 
@@ -1364,18 +1430,22 @@ class _StreamAccordion(QWidget):
         self._toggle.set_text(f"{chevron}  {self._title}")
 
 
-def build_media_workspace_screen(theme: ThemeManager) -> QWidget:
+def build_media_workspace_screen(theme: ThemeManager, controller=None) -> QWidget:
     """Build and return the interactive media workspace screen.
 
     Constructed without running a Qt event loop so it can be asserted
-    headlessly in tests. All visual values come from the injected ``theme``;
-    interaction is UI-only (selection updates preview/details) and no backend
-    is involved.
+    headlessly in tests. All visual values come from the injected ``theme``.
 
     Args:
         theme: The injected theme manager (sole source of visual values).
+        controller: Optional :class:`~gui.integration.workflow_controller.
+            WorkflowController`. When omitted the screen is purely UI-only
+            (selection updates preview/details, no backend). When provided the
+            screen becomes the integration point for its MediaBrowser:
+            selecting a media item drives ``controller.select_video`` and the
+            screen reflects the ``ProjectState`` read back from the controller.
 
     Returns:
         The composed media workspace as a :class:`QWidget`.
     """
-    return _MediaWorkspace(theme)
+    return _MediaWorkspace(theme, controller)
