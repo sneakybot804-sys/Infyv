@@ -35,6 +35,12 @@ from gui_core.export import (
     build_export_plan,
 )
 from gui_core.facade import ApplicationFacade
+from gui_core.frame_provider import (
+    FrameProvider,
+    FrameProviderError,
+    VideoFrame,
+    VideoMetadata,
+)
 from gui_core.log_stream import LogStream
 from gui_core.logs import CoreLogger, LogLevel, LogRecord
 from gui_core.registry import PhaseCategory, PhaseId, PhasePlugin
@@ -89,4 +95,8 @@ __all__ = [
     "ExportPlan",
     "build_export_plan",
     "LogStream",
+    "FrameProvider",
+    "FrameProviderError",
+    "VideoFrame",
+    "VideoMetadata",
 ]
