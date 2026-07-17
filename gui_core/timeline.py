@@ -439,6 +439,34 @@ class Timeline:
         """Return a copy with ``marker`` added (revalidated)."""
         return replace(self, markers=self.markers + (marker,))
 
+    # ------------------------------------------------------------------ #
+    # Derived projections (read-only; no new source of truth)
+    # ------------------------------------------------------------------ #
+    def to_edl(self) -> "EditDecisionList":
+        """Build an :class:`EditDecisionList` projection of this timeline.
+
+        Pure and derived: each track's clips are ordered by ``start`` and
+        numbered per track (0-based). Gaps between clips are preserved as-is;
+        the EDL describes the decisions that exist and never synthesizes
+        filler. The result is a read-only view, not a source of truth.
+        """
+        decisions = []
+        for track in sorted(self.tracks, key=lambda t: t.index):
+            for position, clip in enumerate(self.clips_on_track(track.index)):
+                decisions.append(
+                    EditDecision(
+                        index=position,
+                        clip_id=clip.id,
+                        track_index=clip.track_index,
+                        source=clip.source,
+                        timeline_in=clip.start,
+                        timeline_out=clip.end,
+                    )
+                )
+        return EditDecisionList(
+            duration=self.duration, decisions=tuple(decisions)
+        )
+
     def remove_marker(self, marker_id: str) -> "Timeline":
         """Return a copy without the marker ``marker_id``.
 
@@ -450,3 +478,67 @@ class Timeline:
         return replace(
             self, markers=tuple(m for m in self.markers if m.id != marker_id)
         )
+
+
+@dataclass(frozen=True)
+class EditDecision:
+    """An immutable, ordered edit decision for one clip on one track.
+
+    Attributes:
+        index: 0-based position of this decision within its track.
+        clip_id: The source clip's id.
+        track_index: The track the decision belongs to.
+        source: Optional source identifier carried from the clip.
+        timeline_in: Clip start on the timeline (seconds).
+        timeline_out: Clip end on the timeline (seconds).
+    """
+
+    index: int
+    clip_id: str
+    track_index: int
+    source: Optional[str]
+    timeline_in: float
+    timeline_out: float
+
+    def to_dict(self) -> Dict[str, object]:
+        """Return a plain-dict representation (no framework types)."""
+        return {
+            "index": self.index,
+            "clip_id": self.clip_id,
+            "track_index": self.track_index,
+            "source": self.source,
+            "timeline_in": self.timeline_in,
+            "timeline_out": self.timeline_out,
+        }
+
+
+@dataclass(frozen=True)
+class EditDecisionList:
+    """An immutable, read-only Edit Decision List derived from a timeline.
+
+    This is a *projection* of an authoritative :class:`Timeline`; it holds no
+    editing behavior and is never mutated. Rebuild it from the timeline via
+    :meth:`Timeline.to_edl` after any change.
+
+    Attributes:
+        duration: The source timeline's duration (seconds).
+        decisions: Ordered decisions (by track index, then per-track start).
+    """
+
+    duration: float
+    decisions: Tuple[EditDecision, ...] = ()
+
+    def is_empty(self) -> bool:
+        """Return whether the EDL has no decisions."""
+        return not self.decisions
+
+    def for_track(self, track_index: int) -> Tuple[EditDecision, ...]:
+        """Return the ordered decisions for ``track_index``."""
+        return tuple(d for d in self.decisions if d.track_index == track_index)
+
+    def to_dict(self) -> Dict[str, object]:
+        """Return a plain-dict representation of the whole EDL."""
+        return {
+            "duration": self.duration,
+            "decisions": [d.to_dict() for d in self.decisions],
+        }
