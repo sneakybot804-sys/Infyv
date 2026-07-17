@@ -430,6 +430,10 @@ class _MediaWorkspace(QWidget):
             f"#MediaWorkspacePreviewPlaceholder {{ color: {c.text_muted}; "
             f"background: transparent; }}"
         )
+        # Keep a reference so the ProjectState observer can refresh the empty
+        # state / selected-media text. Object name, style and layout position
+        # are unchanged; only the text is updated later.
+        self._preview_placeholder = placeholder
         stage_layout.addWidget(placeholder)
 
         hint = QLabel("Select a clip to preview", stage)
@@ -1158,10 +1162,7 @@ class _MediaWorkspace(QWidget):
         """
         item = self._browser.current_item()
         if item is None:
-            self._preview_header.set_subtitle("No clip selected")
-            self._detail_name.set_text("Name: \u2014")
-            self._detail_kind.set_text("Type: \u2014")
-            self._detail_status.set_text("Status: no selection")
+            self._show_empty_preview()
             return
 
         # UI-only path (no backend): reflect the browser item directly.
@@ -1170,6 +1171,7 @@ class _MediaWorkspace(QWidget):
             self._detail_name.set_text(f"Name: {item}")
             self._detail_kind.set_text("Type: video/mp4")
             self._detail_status.set_text("Status: ready")
+            self._preview_placeholder.setText(item)
             return
 
         # Integration path: push the selection to the backend, then reflect
@@ -1178,31 +1180,95 @@ class _MediaWorkspace(QWidget):
         # thread, so it degrades to an explicit error state.
         self._reflect_selected_video(item)
 
+    def _show_empty_preview(self) -> None:
+        """Reset every Preview-owned surface to its empty state (no selection).
+
+        Preserves the frozen empty-state text/object names; only text is set.
+        """
+        self._preview_header.set_subtitle("No clip selected")
+        self._preview_placeholder.setText("No clip selected")
+        self._detail_name.set_text("Name: \u2014")
+        self._detail_kind.set_text("Type: \u2014")
+        self._detail_status.set_text("Status: no selection")
+
     def _reflect_selected_video(self, item: str) -> None:
         """Drive ``select_video`` and reflect the controller's ProjectState.
 
         Integration-only helper (called when a WorkflowController is present).
         Reuses the controller's existing write (``select_video``) and read
         (``project_state``) surface; it invents no new backend API and mutates
-        no frozen component. The displayed name prefers the backend's
-        ``video_path`` so the UI always shows what the backend actually holds.
+        no frozen component. The authoritative ``ProjectState`` snapshot is
+        then observed by :meth:`_reflect_preview`.
         """
         try:
             self._controller.select_video(item)
             state = self._controller.project_state()
         except Exception as exc:  # backend rejected the selection
             self._preview_header.set_subtitle(item)
+            self._preview_placeholder.setText(item)
             self._detail_name.set_text(f"Name: {item}")
             self._detail_kind.set_text("Type: video/mp4")
             self._detail_status.set_text(f"Status: error \u2014 {exc}")
             return
+        self._reflect_preview(state, fallback_name=item)
 
+    def _reflect_preview(self, state, fallback_name: str) -> None:
+        """Observe an immutable ``ProjectState`` snapshot into Preview-owned UI.
+
+        Pure observer: reads only fields ``ProjectState`` genuinely exposes
+        (``video_path`` and ``artifacts``) and updates only existing
+        Preview-owned widgets (title/subtitle, placeholder, empty state and
+        the existing Details metadata rows). It stores no state, creates no
+        widget, and never becomes a source of truth.
+
+        Metadata not exposed by the current architecture (duration, fps,
+        resolution, codec, thumbnails, first-frame rendering) is deliberately
+        left unchanged: none of it lives in ``ProjectState`` or on
+        ``WorkflowController``, so fabricating it is out of scope. The
+        decorative HUD badges are therefore intentionally not touched.
+
+        The TransportBar DISPLAY is reset to its initial state for the newly
+        selected media using only its existing public API; no playback logic
+        is added and it remains the single playback-state owner.
+        """
         video_path = getattr(state, "video_path", None)
-        display = video_path.name if video_path is not None else item
+        if video_path is None:
+            self._show_empty_preview()
+            return
+
+        # Title / subtitle / placeholder from the authoritative video_path.
+        display = getattr(video_path, "name", None) or fallback_name
         self._preview_header.set_subtitle(display)
+        self._preview_placeholder.setText(display)
+
+        # Details metadata derived directly from ProjectState (no fabrication).
         self._detail_name.set_text(f"Name: {display}")
-        self._detail_kind.set_text("Type: video/mp4")
-        self._detail_status.set_text("Status: ready")
+        suffix = getattr(video_path, "suffix", "") or ""
+        kind = suffix.lstrip(".").lower()
+        self._detail_kind.set_text(f"Type: {kind}" if kind else "Type: \u2014")
+        self._detail_status.set_text(self._artifact_status(state))
+
+        # Reset the transport DISPLAY for the new selection via public API
+        # only. TransportBar stays the single playback-state owner.
+        self._transport.set_state("stopped")
+        self._transport.set_position(0.0)
+
+    @staticmethod
+    def _artifact_status(state) -> str:
+        """Summarize ``ProjectState.artifacts`` for the existing Status row.
+
+        Uses only the real ``artifacts`` tuple already carried by the state
+        (each item's ``kind.value``); creates no new artifact widget.
+        """
+        artifacts = tuple(getattr(state, "artifacts", ()) or ())
+        if not artifacts:
+            return "Status: ready \u00b7 no artifacts"
+        kinds = ", ".join(
+            getattr(getattr(a, "kind", None), "value", str(a)) for a in artifacts
+        )
+        count = len(artifacts)
+        noun = "artifact" if count == 1 else "artifacts"
+        return f"Status: ready \u00b7 {count} {noun} ({kinds})"
 
     def _on_clip_selected(self, index: int) -> None:
         """Update the clip inspector from the timeline selection (UI-only).
