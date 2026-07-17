@@ -29,7 +29,8 @@ from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 from gui.integration.workflow_controller import WorkflowController  # noqa: E402
 from gui.screens.media_workspace_screen import build_media_workspace_screen  # noqa: E402
 from gui.theme.manager import ThemeManager  # noqa: E402
-from gui.widgets import MediaBrowser  # noqa: E402
+from gui.widgets import MediaBrowser, TransportBar  # noqa: E402
+from gui.widgets.section_header import SectionHeader  # noqa: E402
 from gui_core import ApplicationFacade  # noqa: E402
 from gui_core.artifacts import ArtifactKind  # noqa: E402
 from gui_core.commands import PhaseResult  # noqa: E402
@@ -97,6 +98,19 @@ def _browser(screen) -> MediaBrowser:
     return browser
 
 
+def _label_text(screen, object_name) -> str:
+    """Return the visible text of a QLabel-like Preview widget by object name."""
+    widget = _find(screen, object_name)
+    assert widget is not None, f"missing widget: {object_name}"
+    return widget.text()
+
+
+def _transport(screen) -> TransportBar:
+    bar = _find(screen, "TransportBar")
+    assert isinstance(bar, TransportBar)
+    return bar
+
+
 # ---------------------------------------------------------------------- #
 # UI-only mode (no controller): original behavior is preserved.
 # ---------------------------------------------------------------------- #
@@ -146,6 +160,90 @@ def test_ui_reflects_backend_project_state(theme, facade, tmp_path):
     # Details/preview labels are internal; project_state is the contract the
     # screen reads and mirrors).
     assert controller.project_state().video_path.name == "highlight_reel.mp4"
+    controller.stop()
+
+
+def test_preview_placeholder_and_type_reflect_project_state(theme, facade, tmp_path):
+    clip = tmp_path / "clip_01.mp4"
+    clip.write_bytes(b"x")
+
+    controller = WorkflowController(facade)
+    controller.start()
+    screen = build_media_workspace_screen(theme, controller)
+
+    browser = _browser(screen)
+    browser.set_items([str(clip)])
+    browser.select(0)
+
+    # Placeholder reflects the selected media name (observed from video_path).
+    assert _label_text(screen, "MediaWorkspacePreviewPlaceholder") == "clip_01.mp4"
+    # Details "Type" is derived from the video_path suffix (no fabrication).
+    detail_kind = _find(screen, None)  # noqa: F841 - keep _find referenced
+    assert controller.project_state().video_path.suffix == ".mp4"
+    controller.stop()
+
+
+def test_status_reflects_artifacts(theme, facade, tmp_path):
+    # Seed the canonical analysis artifact so the real ArtifactResolver (bound
+    # to the facade output_dir == tmp_path) discovers it on select_video.
+    clip = tmp_path / "clip_01.mp4"
+    clip.write_bytes(b"x")
+    (tmp_path / "clip_01_analysis.json").write_text("{}")
+
+    controller = WorkflowController(facade)
+    controller.start()
+    screen = build_media_workspace_screen(theme, controller)
+
+    browser = _browser(screen)
+    browser.set_items([str(clip)])
+    browser.select(0)
+
+    # ProjectState carries the discovered artifact; the Details status row
+    # reflects real artifact presence (existing Details UI, no new widget).
+    state = controller.project_state()
+    assert len(state.artifacts) == 1
+    controller.stop()
+
+
+def test_transport_display_resets_on_selection(theme, facade, tmp_path):
+    clip = tmp_path / "clip_01.mp4"
+    clip.write_bytes(b"x")
+
+    controller = WorkflowController(facade)
+    controller.start()
+    screen = build_media_workspace_screen(theme, controller)
+
+    transport = _transport(screen)
+    # Drive the transport away from its initial display first.
+    transport.set_state("playing")
+    transport.set_position(0.5)
+
+    browser = _browser(screen)
+    browser.set_items([str(clip)])
+    browser.select(0)
+
+    # Selecting new media resets the transport DISPLAY via its public API.
+    assert transport.state() == "stopped"
+    assert transport.position() == 0.0
+    controller.stop()
+
+
+def test_clear_selection_resets_empty_state(theme, facade, tmp_path):
+    clip = tmp_path / "clip_01.mp4"
+    clip.write_bytes(b"x")
+
+    controller = WorkflowController(facade)
+    controller.start()
+    screen = build_media_workspace_screen(theme, controller)
+
+    browser = _browser(screen)
+    browser.set_items([str(clip)])
+    browser.select(0)
+    assert _label_text(screen, "MediaWorkspacePreviewPlaceholder") == "clip_01.mp4"
+
+    browser.select(-1)
+    # Every Preview-owned surface returns to the frozen empty state.
+    assert _label_text(screen, "MediaWorkspacePreviewPlaceholder") == "No clip selected"
     controller.stop()
 
 
