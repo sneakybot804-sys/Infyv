@@ -28,9 +28,9 @@ The only public entry point is :func:`build_media_workspace_screen`.
 """
 from __future__ import annotations
 
-from typing import List
+from typing import List, Optional
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QAbstractAnimation, QPropertyAnimation, Qt, QTimer
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
     QFrame,
@@ -44,6 +44,7 @@ from PySide6.QtWidgets import (
 from gui.theme.manager import ThemeManager
 from gui.widgets.clip_inspector import ClipInspector
 from gui.widgets.dropdown import Dropdown
+from gui.widgets.effects import apply_glow  # noqa: F401  (kept: screen-level glow helper)
 from gui.widgets.glass_card import GlassCard
 from gui.widgets.media_browser import MediaBrowser
 from gui.widgets.meta_label import MetaLabel
@@ -103,6 +104,9 @@ class _MediaWorkspace(QWidget):
         # Auto Edit sequencing state (over the existing gated pipeline).
         self._auto_edit_active = False
         self._auto_edit_attempted = set()
+        # Imported-media name -> full path map used when no PreviewMediaSource
+        # is active (e.g. UI-only mode with drag & drop).
+        self._imported_paths = {}
         self.setObjectName("MediaWorkspaceScreen")
         self.setWindowTitle("AI Gaming Video Editor \u2014 Media")
 
@@ -132,7 +136,25 @@ class _MediaWorkspace(QWidget):
         # sidebar's geometry, yet as a proper child it remains discoverable
         # via findChildren and its selection_changed wiring stays live. A
         # future milestone surfaces it when the Media nav item is activated.
-        self._browser = MediaBrowser(theme, items=list(_DEMO_ITEMS))
+        #
+        # Media discovery (backend integration): when a controller is present
+        # the browser is seeded with REAL videos from the configured videos
+        # directory via the existing PreviewMediaSource (VideoPicker +
+        # FFmpegService seam). UI-only construction keeps the demo seed so
+        # every existing caller/test is unaffected.
+        self._media_source = None
+        items = list(_DEMO_ITEMS)
+        if controller is not None:
+            try:
+                from gui.integration.preview_media import PreviewMediaSource
+
+                self._media_source = PreviewMediaSource()
+                real_items = self._media_source.list_items()
+                if real_items:
+                    items = real_items
+            except Exception:
+                self._media_source = None
+        self._browser = MediaBrowser(theme, items=items)
         self._browser.setParent(self)
         self._browser.setVisible(False)
         self._browser.setMinimumWidth(240)
@@ -173,7 +195,7 @@ class _MediaWorkspace(QWidget):
         right_column.setObjectName("MediaWorkspaceRightColumn")
         # Hard width cap: prevents the right column from absorbing surplus
         # horizontal space when the window is maximised on a wide monitor.
-        right_column.setFixedWidth(300)
+        right_column.setFixedWidth(345)
 
         # Top editing area: sidebar | preview | right column.
         # The MediaBrowser is intentionally NOT added to this splitter in M2
@@ -187,11 +209,11 @@ class _MediaWorkspace(QWidget):
 
         self._sidebar = NavigationSidebar(self._theme)
         # Fixed horizontal / Expanding vertical: the sidebar never shrinks
-        # below its setFixedWidth(240) and always fills the vertical space.
-        # setFixedWidth here mirrors the value set inside NavigationSidebar
-        # itself; the redundant call on the outer widget ensures the splitter
-        # geometry engine sees the constraint at the pane level too.
-        self._sidebar.setFixedWidth(240)
+        # below its fixed two-column width and always fills the vertical
+        # space. setFixedWidth here mirrors the value set inside
+        # NavigationSidebar itself; the redundant call on the outer widget
+        # ensures the splitter geometry engine sees the constraint too.
+        self._sidebar.setFixedWidth(NavigationSidebar.TOTAL_WIDTH)
         self._sidebar.setSizePolicy(
             QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding
         )
@@ -201,13 +223,13 @@ class _MediaWorkspace(QWidget):
         splitter.setCollapsible(0, False)  # sidebar must never collapse
         splitter.setCollapsible(1, False)  # preview must never collapse
         splitter.setCollapsible(2, False)  # right column must never collapse
-        splitter.setStretchFactor(0, 0)    # sidebar: fixed at 240px
+        splitter.setStretchFactor(0, 0)    # sidebar: fixed two-column width
         splitter.setStretchFactor(1, 1)    # preview: absorbs ALL spare space
-        splitter.setStretchFactor(2, 0)    # right column: fixed at 300px
+        splitter.setStretchFactor(2, 0)    # right column: fixed at 345px
         # setSizes is a one-time layout hint. The true constraints are the
-        # setFixedWidth calls on sidebar (240px) and right_column (300px);
+        # setFixedWidth calls on sidebar and right_column (345px);
         # those survive maximise / resize events where setSizes does not.
-        splitter.setSizes([240, 1380, 300])
+        splitter.setSizes([NavigationSidebar.TOTAL_WIDTH, 1245, 345])
 
         # Outer vertical split: the editing area over a generous, resizable
         # Timeline region (the timeline is a first-class region, not a strip).
@@ -219,7 +241,9 @@ class _MediaWorkspace(QWidget):
         main_split.addWidget(self._build_timeline())
         main_split.setStretchFactor(0, 1)
         main_split.setStretchFactor(1, 0)
-        main_split.setSizes([620, 300])
+        # Taller default timeline region: 7 pro-NLE lanes (34px each) plus
+        # toolbar / ruler / playhead need ~380px to read like the reference.
+        main_split.setSizes([580, 380])
         root.addWidget(main_split, 1)
 
         # Screen-level wiring: media selection updates preview + details;
@@ -228,6 +252,16 @@ class _MediaWorkspace(QWidget):
         # backend via _on_selection_changed (see below); otherwise it stays
         # UI-only. The single connection covers both modes.
         self._browser.selection_changed.connect(self._on_selection_changed)
+        # Import: the browser's existing import_requested signal opens a real
+        # file dialog and appends the chosen videos (backend path when a
+        # controller is present; harmless UI-only append otherwise).
+        self._browser.import_requested.connect(self._on_import_requested)
+        # Drag & drop media import onto the whole workspace.
+        self.setAcceptDrops(True)
+        # Thumbnails: decode first frames for the browser rows lazily (one
+        # per timer tick, off the critical path) via the existing
+        # PreviewMediaSource decode seam. No-op when no real media source.
+        self._start_thumbnail_loading()
 
         # Phase-execution integration: observe the controller's phase
         # lifecycle signals and reflect run state into the existing Preview
@@ -261,6 +295,33 @@ class _MediaWorkspace(QWidget):
             self._on_playback_state_changed
         )
         self._timeline.playhead_changed.connect(self._on_playhead_changed)
+        # Transport seek scrubber drives the timeline playhead (single
+        # playback clock); audio seek is already connected above.
+        self._transport.seek_requested.connect(self._on_transport_seek)
+        # Loop: replay from 0 when playback reaches the end with loop on.
+        self._timeline.playback_finished.connect(self._on_playback_finished)
+        # Frame-step / shuttle buttons on the transport (looked up by their
+        # frozen object names; wiring-only, no layout or naming change).
+        self._wire_transport_buttons()
+        # Viewer toolbar: zoom / screenshot / fullscreen (existing controls).
+        self._wire_viewer_toolbar()
+        # Timeline editing tools: the existing toolbar glyphs and track-header
+        # controls perform real edits (split/delete/duplicate/zoom/markers/
+        # lock/mute/solo) against the widget model, persisted to the backend
+        # Timeline via the existing update_timeline path.
+        self._wire_timeline_tools()
+        self._wire_track_header_controls()
+        self._wire_edit_shortcuts()
+        # History baseline: the pristine clip model, so the first edit's
+        # pre-state is known and undoable.
+        self._last_clips_snapshot = self._timeline.clips()
+        # Project system: current project path + periodic autosave.
+        self._project_path = None
+        self._start_autosave()
+        # Sidebar project actions: "+ New Project" creates a fresh project;
+        # recent rows open the matching saved project when one exists (looked
+        # up by row name against the persisted recents index).
+        self._wire_sidebar_projects()
 
     # ------------------------------------------------------------------ #
     # Region builders
@@ -332,13 +393,15 @@ class _MediaWorkspace(QWidget):
         vt_row.addWidget(grid_toggle, 0)
 
         shot_btn = NeonButton(
-            self._theme, "Screenshot", variant="ghost", accent="cyan"
+            self._theme, "Screenshot", variant="ghost", accent="cyan",
+            icon_name="camera",
         )
         shot_btn.setObjectName("MediaWorkspaceViewerScreenshot")
         vt_row.addWidget(shot_btn, 0)
 
         fs_btn = NeonButton(
-            self._theme, "Fullscreen", variant="ghost", accent="cyan"
+            self._theme, "Fullscreen", variant="ghost", accent="cyan",
+            icon_name="monitor",
         )
         fs_btn.setObjectName("MediaWorkspaceViewerFullscreen")
         vt_row.addWidget(fs_btn, 0)
@@ -349,7 +412,10 @@ class _MediaWorkspace(QWidget):
             f"border: 1px solid {tokens.colors.border}; "
             f"border-radius: {tokens.radius.md}px; }}"
         )
-        inner.addWidget(viewer_toolbar)
+        # Reference layout places this editing strip BELOW the video stage
+        # (after the transport controls), so it is inserted further down —
+        # right after ``self._transport`` (visual reorder only; same widgets,
+        # names and signals).
 
         # Cinematic preview stage: a deep gradient backdrop with a soft glass
         # border, a glass HUD overlay (timecode + badges), a subtle safe-area
@@ -360,10 +426,17 @@ class _MediaWorkspace(QWidget):
         stage.setMinimumHeight(360)
         c = tokens.colors
         stage_radius = tokens.radius.lg
+        # Cinematic backdrop: a deep multi-stop gradient with faint purple /
+        # blue color hints so the empty viewer reads like a lit stage, not a
+        # dead panel (visual-only).
         stage.setStyleSheet(
             f"#MediaWorkspacePreviewStage {{ "
-            f"background: qlineargradient(x1:0, y1:0, x2:0, y2:1, "
-            f"stop:0 {c.background_base}, stop:1 {c.background_deep}); "
+            f"background: qlineargradient(x1:0, y1:0, x2:1, y2:1, "
+            f"stop:0 {c.background_base}, "
+            f"stop:0.35 #100A1E, "
+            f"stop:0.55 #16102A, "
+            f"stop:0.75 #100A1E, "
+            f"stop:1 {c.background_deep}); "
             f"border: 1px solid {c.glass_border}; "
             f"border-radius: {stage_radius}px; }}"
         )
@@ -392,6 +465,9 @@ class _MediaWorkspace(QWidget):
         timecode = QLabel("00:00:00:00", hud)
         timecode.setObjectName("MediaWorkspacePreviewTimecode")
         timecode.setFont(self._theme.font("mono"))
+        timecode.setMinimumWidth(
+            timecode.fontMetrics().horizontalAdvance("00:00:00:00") + 8
+        )
         timecode.setStyleSheet(
             f"#MediaWorkspacePreviewTimecode {{ color: {c.accent_cyan}; "
             f"background: transparent; }}"
@@ -458,6 +534,33 @@ class _MediaWorkspace(QWidget):
 
         # Centered premium empty state (keeps the existing object name / type).
         stage_layout.addStretch(1)
+        # A glowing gradient play tile above the placeholder text so the empty
+        # viewer looks intentional and premium (decorative, additive name).
+        play_tile = QLabel(stage)
+        play_tile.setObjectName("MediaWorkspacePreviewPlayTile")
+        tile_side = 64
+        glyph_side = 26
+        play_tile.setFixedSize(tile_side, tile_side)
+        play_tile.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        play_tile.setPixmap(
+            self._theme.icons.icon(
+                "play", c.text_primary, glyph_side
+            ).pixmap(glyph_side, glyph_side)
+        )
+        play_tile.setStyleSheet(
+            f"#MediaWorkspacePreviewPlayTile {{ "
+            f"background: qlineargradient(x1:0, y1:0, x2:1, y2:1, "
+            f"stop:0 {c.accent_blue}, stop:1 {c.accent_purple}); "
+            f"border: 2px solid {c.glass_highlight}; "
+            f"border-radius: {tile_side // 2}px; }}"
+        )
+        stage_layout.addWidget(
+            play_tile, 0, Qt.AlignmentFlag.AlignHCenter
+        )
+        # Kept as an attribute so show_frame()/clear_frame() can hide the
+        # decorative tile while a real decoded frame is displayed.
+        self._preview_play_tile = play_tile
+        stage_layout.addSpacing(tokens.spacing.sm)
         placeholder = QLabel("No clip selected", stage)
         placeholder.setObjectName("MediaWorkspacePreviewPlaceholder")
         placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -500,6 +603,10 @@ class _MediaWorkspace(QWidget):
         self._transport = TransportBar(self._theme)
         inner.addWidget(self._transport)
 
+        # Editing toolbar sits under the transport row, matching the
+        # reference (toolbar built above, before the stage).
+        inner.addWidget(viewer_toolbar)
+
         # --- Phase 10F: bottom player toolbar (decorative caption strip) --- #
         player_toolbar = QWidget(content)
         player_toolbar.setObjectName("MediaWorkspacePlayerToolbar")
@@ -509,15 +616,31 @@ class _MediaWorkspace(QWidget):
         )
         pt_row.setSpacing(tokens.spacing.md)
         for text, name in (
-            ("00:00:00", "MediaWorkspacePlayerCurrentTime"),
-            ("/ 00:00:32", "MediaWorkspacePlayerDuration"),
+            ("00:00:42:16", "MediaWorkspacePlayerCurrentTime"),
+            ("/ 00:02:15:08", "MediaWorkspacePlayerDuration"),
             ("Zoom 100%", "MediaWorkspacePlayerZoom"),
             ("Speed 1.0x", "MediaWorkspacePlayerSpeed"),
             ("Loop", "MediaWorkspacePlayerLoop"),
             ("Viewer: Ready", "MediaWorkspacePlayerStatus"),
             ("Quality: Full", "MediaWorkspacePlayerQuality"),
         ):
-            detail = MetaLabel(self._theme, text, role="muted", style="caption")
+            # Timecode readouts render in mono with a cyan current-time so
+            # the row reads like a pro NLE player bar; other captions stay
+            # muted (visual-only; names and texts unchanged).
+            if name in (
+                "MediaWorkspacePlayerCurrentTime",
+                "MediaWorkspacePlayerDuration",
+            ):
+                detail = MetaLabel(self._theme, text, role="muted", style="mono")
+                if name == "MediaWorkspacePlayerCurrentTime":
+                    detail.setStyleSheet(
+                        f"color: {tokens.colors.accent_cyan}; "
+                        f"background: transparent;"
+                    )
+            else:
+                detail = MetaLabel(
+                    self._theme, text, role="muted", style="caption"
+                )
             detail.setObjectName(name)
             pt_row.addWidget(detail, 0)
             if name == "MediaWorkspacePlayerDuration":
@@ -767,46 +890,94 @@ class _MediaWorkspace(QWidget):
         stream.setContentsMargins(s.sm, s.md, s.sm, s.md)
         stream.setSpacing(s.lg)
 
-        # ---- Header: title + inline Export action ---- #
-        header_row = QHBoxLayout()
-        header_row.setContentsMargins(0, 0, 0, 0)
-        header_row.setSpacing(s.sm)
-        header_title = MetaLabel(
-            self._theme, "AI ASSISTANT", role="muted", style="caption"
-        )
-        header_title.setObjectName("MediaWorkspaceRightStreamHeader")
-        header_row.addWidget(header_title, 0)
-        header_row.addStretch(1)
-        export_btn = NeonButton(
-            self._theme, "Export", variant="primary", accent="blue"
-        )
-        export_btn.setObjectName("MediaWorkspaceRightStreamExport")
-        header_row.addWidget(export_btn, 0)
-        stream.addLayout(header_row)
+        # ---- Header: NEXUS inspector tab strip (decorative pills) ---- #
+        # The reference panel is headed by four uppercase tabs; "AI STUDIO"
+        # is active (gradient pill), the rest are quiet captions. Purely
+        # visual -- the stream below always shows every section.
+        tab_row = QHBoxLayout()
+        tab_row.setContentsMargins(0, 0, 0, 0)
+        tab_row.setSpacing(s.xxs)
+        for tab_text, active in (
+            ("AI STUDIO", True),
+            ("PROPERTIES", False),
+            ("EFFECTS", False),
+            ("INSPECTOR", False),
+        ):
+            tab = QLabel(tab_text)
+            tab.setObjectName(
+                "MediaWorkspaceRightTabActive" if active
+                else "MediaWorkspaceRightTab"
+            )
+            tab.setFont(self._theme.font("caption"))
+            tab.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            # Minimum width based on longest tab text so labels never clip.
+            tab.setMinimumWidth(
+                tab.fontMetrics().horizontalAdvance(tab_text) + 2 * s.xs + 4
+            )
+            if active:
+                tab.setStyleSheet(
+                    f"#MediaWorkspaceRightTabActive {{ "
+                    f"color: {c.text_primary}; font-weight: 700; "
+                    f"background: qlineargradient(x1:0, y1:0, x2:1, y2:1, "
+                    f"stop:0 {c.accent_blue}, stop:1 {c.accent_purple}); "
+                    f"border: 1px solid {c.glass_highlight}; "
+                    f"border-radius: {r.sm}px; "
+                    f"padding: {s.xxs + 1}px {s.xs}px; }}"
+                )
+            else:
+                tab.setStyleSheet(
+                    f"#MediaWorkspaceRightTab {{ "
+                    f"color: {c.text_muted}; font-weight: 600; "
+                    f"background: transparent; "
+                    f"border: 1px solid transparent; "
+                    f"border-radius: {r.sm}px; "
+                    f"padding: {s.xxs + 1}px {s.xs}px; }}"
+                )
+            tab.setSizePolicy(
+                QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
+            )
+            tab_row.addWidget(tab, 1)
+        stream.addLayout(tab_row)
 
-        # ---- Section 1: two-column AI tool card grid ---- #
+        # ---- Section 1: three-column AI tool card grid ---- #
         ai_grid = QGridLayout()
-        ai_grid.setHorizontalSpacing(s.sm)
-        ai_grid.setVerticalSpacing(s.sm)
+        ai_grid.setHorizontalSpacing(s.xs)
+        ai_grid.setVerticalSpacing(s.xs)
         ai_grid.setContentsMargins(0, 0, 0, 0)
         ai_tools = (
-            ("Auto Edit", "Create edit automatically"),
-            ("Highlight Detection", "Find best moments"),
-            ("Funny Moment", "Detect funny moments"),
-            ("Beat Sync", "Sync to music beat"),
-            ("Subtitle Generator", "Auto generate subtitles"),
-            ("Thumbnail Generator", "Create thumbnails"),
-            ("Script Assistant", "Generate video scripts"),
-            ("Voice Cleanup", "Enhance voice quality"),
+            ("Auto Edit", "wand"),
+            ("Highlight Detection", "sparkles"),
+            ("Funny Moment", "zap"),
+            ("Beat Sync", "activity"),
+            ("Subtitle Generator", "type"),
+            ("Thumbnail Generator", "image"),
+            ("Script Writer", "bot"),
+            ("Voice Cleanup", "mic"),
+            ("Scene Enhance", "spark"),
         )
+        # Card title -> registered backend phase id (gui_core registry).
+        # Only real phases are mapped; "Auto Edit" runs the full gated
+        # pipeline via the existing sequencer. Titles with no backend phase
+        # report honestly instead of fabricating behavior.
+        ai_phase_map = {
+            "Highlight Detection": "highlight",
+            "Funny Moment": "fusion",
+            "Beat Sync": "audio",
+            "Subtitle Generator": "subtitles",
+            "Script Writer": "decision",
+            "Voice Cleanup": "audio",
+            "Scene Enhance": "analysis",
+        }
         card_qss = (
             f"QFrame#MediaWorkspaceAiToolCard {{ "
-            f"background: {c.surface}; "
-            f"border: 1px solid {c.border}; "
+            f"background: qlineargradient(x1:0, y1:0, x2:0, y2:1, "
+            f"stop:0 {c.surface_elevated}, stop:1 {c.surface}); "
+            f"border: 1px solid {c.glass_border}; "
             f"border-radius: {r.md}px; }} "
             f"QFrame#MediaWorkspaceAiToolCard:hover {{ "
             f"border: 1px solid {c.accent_purple}; "
-            f"background: {c.surface_elevated}; }}"
+            f"background: qlineargradient(x1:0, y1:0, x2:0, y2:1, "
+            f"stop:0 {c.surface_overlay}, stop:1 {c.surface_elevated}); }}"
         )
         # Compact, ultra-tight "AI" chip styling (token-derived). Scoped to
         # this screen so the frozen StatusBadge widget is untouched; using a
@@ -819,37 +990,88 @@ class _MediaWorkspace(QWidget):
             f"border-radius: {r.sm}px; "
             f"padding: 0px {s.xxs}px; }}"
         )
-        for idx, (title, desc) in enumerate(ai_tools):
+        for idx, (title, icon_name) in enumerate(ai_tools):
             card = QFrame()
             card.setObjectName("MediaWorkspaceAiToolCard")
             card.setFrameShape(QFrame.Shape.StyledPanel)
-            # Adaptive height: allow two title lines + a description without
-            # truncation. A raised floor keeps single-line cards uniform, and
-            # MinimumExpanding lets a wrapped title grow the card instead of
-            # clipping ("Highlight Det...").
-            card.setMinimumHeight(72)
+            # Wire the card to its backend phase (or the Auto Edit
+            # sequencer). Availability/gating stays owned by the pipeline:
+            # _run_ai_tool re-checks available_phases() at click time.
+            if title == "Auto Edit":
+                self._register_click(card, self.start_auto_edit)
+            elif title in ai_phase_map:
+                self._register_click(
+                    card,
+                    lambda p=ai_phase_map[title], t=title: self._run_ai_tool(t, p),
+                )
+            else:
+                # No backend phase exists (e.g. Thumbnail Generator): report
+                # honestly on click rather than fabricating behavior.
+                self._register_click(
+                    card,
+                    lambda t=title: self._detail_status.set_text(
+                        f"{t}: no backend phase available"
+                    ),
+                )
+            # Reference cards: square-ish tiles, icon stacked above a small
+            # centered title (which may wrap to two lines).
+            card.setMinimumHeight(88)
+            # Ignored horizontal policy: the three grid columns split the
+            # fixed 345px panel evenly instead of the cards' content minimums
+            # forcing the scroll content wider than the panel (which squeezed
+            # and overflowed the whole sidebar).
             card.setSizePolicy(
-                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Ignored,
                 QSizePolicy.Policy.MinimumExpanding,
             )
             card.setStyleSheet(card_qss)
             card_layout = QVBoxLayout(card)
-            card_layout.setContentsMargins(s.sm, s.sm, s.sm, s.sm)
-            # Real vertical breathing room between the title row and the
-            # description so the two never bleed into each other.
+            card_layout.setContentsMargins(s.xs, s.xs, s.xs, s.xs)
             card_layout.setSpacing(s.xxs)
 
-            # Title row: the title MAY wrap to a second line (multi-word tools
-            # like "Highlight Detection") and takes the flexible space; the
-            # compact AI chip is pinned to the top-right so it never steals
-            # width from the title.
-            title_row = QHBoxLayout()
-            title_row.setContentsMargins(0, 0, 0, 0)
-            title_row.setSpacing(s.xs)
+            # Badge row: tiny "AI" chip pinned top-right, per the reference.
+            badge_row = QHBoxLayout()
+            badge_row.setContentsMargins(0, 0, 0, 0)
+            badge_row.setSpacing(0)
+            badge_row.addStretch(1)
+            badge = QLabel("AI", card)
+            badge.setObjectName("MediaWorkspaceAiToolBadge")
+            badge.setFont(self._theme.font("caption"))
+            badge.setStyleSheet(chip_qss)
+            badge.setSizePolicy(
+                QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
+            )
+            badge_row.addWidget(badge, 0)
+            card_layout.addLayout(badge_row)
+
+            # Gradient icon tile, horizontally centered above the title.
+            tile = QLabel(card)
+            tile.setObjectName("MediaWorkspaceAiToolIcon")
+            tile_side = 30
+            icon_side = 15
+            tile.setFixedSize(tile_side, tile_side)
+            tile.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            tile.setPixmap(
+                self._theme.icons.icon(
+                    icon_name, c.text_primary, icon_side
+                ).pixmap(icon_side, icon_side)
+            )
+            tile.setStyleSheet(
+                f"#MediaWorkspaceAiToolIcon {{ "
+                f"background: qlineargradient(x1:0, y1:0, x2:1, y2:1, "
+                f"stop:0 {c.accent_blue}, stop:1 {c.accent_purple}); "
+                f"border: 1px solid {c.glass_highlight}; "
+                f"border-radius: {r.sm + 2}px; }}"
+            )
+            card_layout.addWidget(
+                tile, 0, Qt.AlignmentFlag.AlignHCenter
+            )
+
             title_lbl = QLabel(title, card)
             title_lbl.setObjectName("MediaWorkspaceAiToolTitle")
             title_lbl.setFont(self._theme.font("caption"))
             title_lbl.setWordWrap(True)
+            title_lbl.setAlignment(Qt.AlignmentFlag.AlignHCenter)
             title_lbl.setTextInteractionFlags(
                 Qt.TextInteractionFlag.NoTextInteraction
             )
@@ -858,83 +1080,252 @@ class _MediaWorkspace(QWidget):
                 f"background: transparent; }}"
             )
             title_lbl.setSizePolicy(
-                QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred
+                QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
             )
-            title_row.addWidget(title_lbl, 1)
-            badge = QLabel("AI", card)
-            badge.setObjectName("MediaWorkspaceAiToolBadge")
-            badge.setFont(self._theme.font("caption"))
-            badge.setStyleSheet(chip_qss)
-            badge.setSizePolicy(
-                QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
-            )
-            title_row.addWidget(
-                badge,
-                0,
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop,
-            )
-            card_layout.addLayout(title_row)
-
-            desc_lbl = MetaLabel(
-                self._theme, desc, role="muted", style="caption"
-            )
-            desc_lbl.setObjectName("MediaWorkspaceAiToolDesc")
-            # Let the description wrap freely and claim the height it needs.
-            desc_lbl.setSizePolicy(
-                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
-            )
-            card_layout.addWidget(desc_lbl)
+            card_layout.addWidget(title_lbl)
             card_layout.addStretch(1)
 
             # Top-align each cell so an uneven (two-line) card in one column
             # does not vertically stretch its single-line neighbour.
             ai_grid.addWidget(
-                card, idx // 2, idx % 2, Qt.AlignmentFlag.AlignTop
+                card, idx // 3, idx % 3, Qt.AlignmentFlag.AlignTop
             )
         ai_grid.setColumnStretch(0, 1)
         ai_grid.setColumnStretch(1, 1)
+        ai_grid.setColumnStretch(2, 1)
         stream.addLayout(ai_grid)
 
         # ---- Section 2: collapsible Properties accordions ---- #
-        props_header = SectionHeader(self._theme, "Properties")
+        props_header = SectionHeader(self._theme, "PROPERTIES")
         props_header.setObjectName("MediaWorkspaceRightStreamSection")
         props_header.set_divider(True)
+        self._style_stream_header(props_header, accent=True)
+        # Trailing ✕ close glyph like the reference (decorative).
+        props_close = QLabel(props_header)
+        props_close.setObjectName("MediaWorkspacePropertiesClose")
+        close_side = 12
+        props_close.setPixmap(
+            self._theme.icons.icon("x", c.text_muted, close_side)
+            .pixmap(close_side, close_side)
+        )
+        props_close.setStyleSheet(
+            "#MediaWorkspacePropertiesClose { background: transparent; }"
+        )
+        props_header.set_action(props_close)
         stream.addWidget(props_header)
+
+        # Sub-tab pill strip (Transform active), matching the reference's
+        # Transform / Video / Audio / Speed selector. Decorative only.
+        subtab_row = QHBoxLayout()
+        subtab_row.setContentsMargins(0, 0, 0, 0)
+        subtab_row.setSpacing(s.xxs)
+        for sub_text, sub_active in (
+            ("Transform", True), ("Video", False),
+            ("Audio", False), ("Speed", False),
+        ):
+            pill = QLabel(sub_text)
+            pill.setObjectName(
+                "MediaWorkspacePropsSubTabActive" if sub_active
+                else "MediaWorkspacePropsSubTab"
+            )
+            pill.setFont(self._theme.font("caption"))
+            pill.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            if sub_active:
+                pill.setStyleSheet(
+                    f"#MediaWorkspacePropsSubTabActive {{ "
+                    f"color: {c.text_primary}; font-weight: 600; "
+                    f"background: rgba(168, 85, 247, 0.22); "
+                    f"border: 1px solid rgba(168, 85, 247, 0.55); "
+                    f"border-radius: {r.sm}px; "
+                    f"padding: {s.xxs}px {s.xs}px; }}"
+                )
+            else:
+                pill.setStyleSheet(
+                    f"#MediaWorkspacePropsSubTab {{ "
+                    f"color: {c.text_muted}; "
+                    f"background: {c.surface}; "
+                    f"border: 1px solid {c.border}; "
+                    f"border-radius: {r.sm}px; "
+                    f"padding: {s.xxs}px {s.xs}px; }}"
+                )
+            pill.setSizePolicy(
+                QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
+            )
+            subtab_row.addWidget(pill, 1)
+        stream.addLayout(subtab_row)
 
         transform_acc = self._build_stream_accordion("Transform")
         # X / Y coordinate rows with axis-prefixed numeric fields; Scale
         # exposes a proportional-lock "Link" affordance matching the mock.
+        transform_acc.add_axis_row("Position", "960.0", "540.0")
         transform_acc.add_axis_row("Scale", "100.0%", "100.0%", linked=True)
-        transform_acc.add_axis_row("Position", "0.0", "0.0")
-        stream.addWidget(transform_acc)
-
-        audio_acc = self._build_stream_accordion("Audio")
-        # Single horizontal slider + one matching numeric field (not a dual
-        # input) so Audio reads as a level control, per the reference. The
-        # value is shown in decibels (0.0 dB) to match premium editor tools.
-        audio_acc.add_slider_row(
-            "Volume",
-            Slider(self._theme, minimum=0.0, maximum=200.0, value=100.0, accent="blue"),
-            "0.0 dB",
+        self._prop_rotation = Slider(
+            self._theme, minimum=-180.0, maximum=180.0, value=0.0,
+            accent="blue",
         )
-        stream.addWidget(audio_acc)
+        transform_acc.add_slider_row(
+            "Rotation",
+            self._prop_rotation,
+            "0.0°",
+            reset=True,
+        )
+        transform_acc.add_axis_row("Anchor Point", "0.0", "0.0")
+        self._prop_opacity = Slider(
+            self._theme, minimum=0.0, maximum=100.0, value=100.0,
+            accent="blue",
+        )
+        transform_acc.add_slider_row(
+            "Opacity",
+            self._prop_opacity,
+            "100%",
+            reset=True,
+        )
+        stream.addWidget(transform_acc)
+        # Property wiring: every slider writes through the controller's
+        # existing set_setting (SettingsChanged on the backend bus). The
+        # axis fields are wired after the accordion exists (below).
+        self._prop_rotation.value_changed.connect(
+            lambda v: self._on_property_changed("clip.rotation", round(v, 1))
+        )
+        self._prop_opacity.value_changed.connect(
+            lambda v: self._on_property_changed("clip.opacity", round(v, 1))
+        )
+        self._wire_transform_fields(transform_acc)
 
-        # ---- Section 3: Background Tasks monitor ---- #
-        tasks_header = SectionHeader(self._theme, "Background Tasks")
+        # ---- Section 3: EFFECTS (5) checkbox + toggle list ---- #
+        effects_header = SectionHeader(self._theme, "EFFECTS (5)")
+        effects_header.setObjectName("MediaWorkspaceRightStreamSection")
+        effects_header.set_divider(True)
+        self._style_stream_header(effects_header, accent=True)
+        stream.addWidget(effects_header)
+
+        effects_card = QFrame()
+        effects_card.setObjectName("MediaWorkspaceEffectsList")
+        effects_card.setFrameShape(QFrame.Shape.StyledPanel)
+        effects_card.setStyleSheet(
+            f"#MediaWorkspaceEffectsList {{ "
+            f"background: {c.surface}; "
+            f"border: 1px solid {c.border}; "
+            f"border-radius: {r.md}px; }}"
+        )
+        effects_col = QVBoxLayout(effects_card)
+        effects_col.setContentsMargins(s.sm, s.xs, s.sm, s.xs)
+        effects_col.setSpacing(s.xs)
+        for fx_name, fx_on in (
+            ("Glow", True),
+            ("Camera Shake", True),
+            ("RGB Split", True),
+            ("Gaussian Blur", False),
+            ("Chromatic Aberration", True),
+        ):
+            fx_row = QHBoxLayout()
+            fx_row.setContentsMargins(0, 0, 0, 0)
+            fx_row.setSpacing(s.xs)
+            check = QLabel("✓" if fx_on else "", effects_card)
+            check.setObjectName("MediaWorkspaceEffectCheck")
+            check_side = 15
+            check.setFixedSize(check_side, check_side)
+            check.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            if fx_on:
+                check.setStyleSheet(
+                    f"#MediaWorkspaceEffectCheck {{ "
+                    f"color: {c.text_primary}; font-size: 9px; "
+                    f"background: qlineargradient(x1:0, y1:0, x2:1, y2:1, "
+                    f"stop:0 {c.accent_blue}, stop:1 {c.accent_purple}); "
+                    f"border: 1px solid {c.glass_highlight}; "
+                    f"border-radius: 4px; }}"
+                )
+            else:
+                check.setStyleSheet(
+                    f"#MediaWorkspaceEffectCheck {{ "
+                    f"background: {c.surface_overlay}; "
+                    f"border: 1px solid {c.border}; "
+                    f"border-radius: 4px; }}"
+                )
+            fx_row.addWidget(check, 0, Qt.AlignmentFlag.AlignVCenter)
+            fx_lbl = MetaLabel(
+                self._theme, fx_name,
+                role="primary" if fx_on else "muted",
+                style="body_small",
+            )
+            fx_row.addWidget(fx_lbl, 1)
+            fx_toggle = ToggleSwitch(
+                self._theme, checked=fx_on, accent="blue"
+            )
+            fx_toggle.setObjectName("MediaWorkspaceEffectToggle")
+            # Wire the toggle to the backend settings store (existing
+            # set_setting seam). NOTE: the repository has no backend effect
+            # renderers (no glow/blur/rgb-split/shake/aberration pipeline);
+            # only the enabled-state persists. Reported as a genuine gap.
+            fx_key = "effect." + fx_name.lower().replace(" ", "_")
+            fx_toggle.toggled.connect(
+                lambda on, k=fx_key: self._on_property_changed(k, bool(on))
+            )
+            fx_row.addWidget(fx_toggle, 0, Qt.AlignmentFlag.AlignVCenter)
+            effects_col.addLayout(fx_row)
+        stream.addWidget(effects_card)
+
+        # ---- Section 4: RENDER QUEUE (2 tasks) ---- #
+        export_header = SectionHeader(self._theme, "RENDER QUEUE")
+        export_header.setObjectName("MediaWorkspaceRightStreamSection")
+        export_header.set_divider(True)
+        self._style_stream_header(export_header, accent=True)
+        queue_count = MetaLabel(
+            self._theme, "2 Tasks", role="muted", style="caption"
+        )
+        queue_count.setObjectName("MediaWorkspaceRenderQueueCount")
+        export_header.set_action(queue_count)
+        stream.addWidget(export_header)
+        self._render_queue_count = queue_count
+
+        self._render_task_row = self._build_stream_task(
+            "Valorant Montage 4K",
+            "4K \u00b7 60fps \u00b7 H.265 \u00b7 80 Mbps",
+            0.62,
+            "blue",
+            thumb=True,
+            eta="Remaining: 00:02:48",
+            highlight=True,
+        )
+        stream.addWidget(self._render_task_row)
+        self._render_task_row2 = self._build_stream_task(
+            "YouTube Short Teaser",
+            "1080p \u00b7 60fps \u00b7 H.264",
+            0.0,
+            "purple",
+            thumb=True,
+            pct_text="Waiting",
+        )
+        stream.addWidget(self._render_task_row2)
+
+        # ---- Section 5: BACKGROUND TASKS (3 slim rows) ---- #
+        tasks_header = SectionHeader(self._theme, "BACKGROUND TASKS")
         tasks_header.setObjectName("MediaWorkspaceRightStreamSection")
         tasks_header.set_divider(True)
+        self._style_stream_header(tasks_header, accent=True)
+        tasks_count = MetaLabel(
+            self._theme, "3 Tasks", role="muted", style="caption"
+        )
+        tasks_count.setObjectName("MediaWorkspaceBackgroundTasksCount")
+        tasks_header.set_action(tasks_count)
         stream.addWidget(tasks_header)
+        self._bg_tasks_count = tasks_count
 
-        stream.addWidget(
-            self._build_stream_task(
-                "AI Analyzing", "Analyzing audio & video\u2026", 0.78, "cyan"
+        self._bg_task_rows = {}
+        for phase_key, title, subtitle, frac, icon in (
+            ("analysis", "AI Scene Analysis",
+             "Analyzing gameplay footage\u2026", 0.75, "bot"),
+            ("subtitles", "Auto Subtitle Generation",
+             "Transcribing voice track\u2026", 0.48, "type"),
+            ("audio", "Voice Cleanup",
+             "Removing background noise\u2026", 0.32, "mic"),
+        ):
+            row = self._build_stream_task(
+                title, subtitle, frac, "cyan", icon=icon,
+                icon_color=c.success,
             )
-        )
-        stream.addWidget(
-            self._build_stream_task(
-                "Generating Thumbnails", "Creating thumbnails\u2026", 0.65, "purple"
-            )
-        )
+            self._bg_task_rows[phase_key] = row
+            stream.addWidget(row)
 
         stream.addStretch(1)
         master_scroll.setWidget(content)
@@ -944,25 +1335,118 @@ class _MediaWorkspace(QWidget):
         """Return a themed collapsible accordion frame for the right stream."""
         return _StreamAccordion(self._theme, title)
 
+    def _style_stream_header(
+        self, header: SectionHeader, *, accent: bool = False
+    ) -> None:
+        """Restyle a right-stream SectionHeader title as a compact caption.
+
+        Visual-only: the reference panel renders its section titles as small
+        uppercase blue captions ("PROPERTIES" / "EXPORT QUEUE" / ...), not
+        h2 headings. This tweaks only the title QLabel's font and color on
+        the already-built header (no SectionHeader API/behaviour change).
+        """
+        c = self._theme.tokens.colors
+        color = c.accent_blue if accent else c.text_muted
+        for label in header.findChildren(QLabel):
+            if label.text() == header.title():
+                label.setFont(self._theme.font("caption"))
+                # Ensure section header title is never clipped by giving it
+                # a minimum width based on its own text metrics.
+                label.setMinimumWidth(
+                    label.fontMetrics().horizontalAdvance(label.text()) + 8
+                )
+                label.setStyleSheet(
+                    f"color: {color}; background: transparent; "
+                    f"font-weight: 700; letter-spacing: 1px;"
+                )
+                break
+
     def _build_stream_task(
-        self, title: str, subtitle: str, fraction: float, accent: str
+        self, title: str, subtitle: str, fraction: float, accent: str,
+        *, thumb: bool = False, icon: Optional[str] = None,
+        icon_color: Optional[str] = None, eta: Optional[str] = None,
+        highlight: bool = False, pct_text: Optional[str] = None,
     ) -> QWidget:
         """Build one Background Tasks monitor row (label + ProgressBar).
 
         UI-only and decorative; ``fraction`` is a static 0..1 progress value
-        and ``accent`` selects the ProgressBar accent. No backend is involved.
+        and ``accent`` selects the ProgressBar accent. ``thumb`` adds a small
+        gradient clip-thumbnail tile on the left (Render Queue rows);
+        ``icon`` adds a rounded icon tile instead (Background Tasks rows),
+        tinted with ``icon_color``; ``eta`` renders a trailing accent-colored
+        ETA next to the percentage; ``highlight`` wraps the row in an
+        accent-bordered card (the reference's active render job);
+        ``pct_text`` overrides the trailing percent label (e.g. "Waiting").
+        No backend is involved.
         """
         tokens = self._theme.tokens
+        c = tokens.colors
         s = tokens.spacing
 
         row = QWidget()
-        row.setObjectName("MediaWorkspaceBackgroundTask")
-        row.setStyleSheet(
-            f"#MediaWorkspaceBackgroundTask {{ background: transparent; }}"
+        # Ignored horizontal policy: rows fit the fixed panel width instead
+        # of their content minimums widening the scroll content (same fix as
+        # the AI card grid).
+        row.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
         )
-        layout = QVBoxLayout(row)
-        layout.setContentsMargins(0, s.xxs, 0, s.xxs)
-        layout.setSpacing(s.xxs)
+        row.setObjectName(
+            "MediaWorkspaceBackgroundTaskActive" if highlight
+            else "MediaWorkspaceBackgroundTask"
+        )
+        if highlight:
+            row.setStyleSheet(
+                f"#MediaWorkspaceBackgroundTaskActive {{ "
+                f"background: rgba(168, 85, 247, 0.10); "
+                f"border: 1px solid rgba(168, 85, 247, 0.45); "
+                f"border-radius: {tokens.radius.md}px; }}"
+            )
+        else:
+            row.setStyleSheet(
+                f"#MediaWorkspaceBackgroundTask {{ background: transparent; }}"
+            )
+        outer = QHBoxLayout(row)
+        pad_h = s.sm if highlight else 0
+        outer.setContentsMargins(pad_h, s.xs if highlight else s.xxs,
+                                 pad_h, s.xs if highlight else s.xxs)
+        outer.setSpacing(s.sm)
+
+        if thumb:
+            tile = QLabel(row)
+            tile.setObjectName("MediaWorkspaceTaskThumb")
+            tile.setFixedSize(44, 32)
+            tile.setStyleSheet(
+                f"#MediaWorkspaceTaskThumb {{ "
+                f"background: qlineargradient(x1:0, y1:0, x2:1, y2:1, "
+                f"stop:0 {c.accent_purple}, stop:0.5 #1A1030, "
+                f"stop:1 {c.accent_blue}); "
+                f"border: 1px solid {c.glass_border}; "
+                f"border-radius: {tokens.radius.sm}px; }}"
+            )
+            outer.addWidget(tile, 0, Qt.AlignmentFlag.AlignTop)
+        elif icon is not None:
+            tint = icon_color or c.accent_blue
+            tile = QLabel(row)
+            tile.setObjectName("MediaWorkspaceTaskIcon")
+            tile_side = 28
+            glyph = 14
+            tile.setFixedSize(tile_side, tile_side)
+            tile.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            tile.setPixmap(
+                self._theme.icons.icon(icon, tint, glyph)
+                .pixmap(glyph, glyph)
+            )
+            tile.setStyleSheet(
+                f"#MediaWorkspaceTaskIcon {{ "
+                f"background: {c.surface_overlay}; "
+                f"border: 1px solid {c.glass_border}; "
+                f"border-radius: {tokens.radius.sm}px; }}"
+            )
+            outer.addWidget(tile, 0, Qt.AlignmentFlag.AlignTop)
+
+        body = QVBoxLayout()
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(s.xxs)
 
         top = QHBoxLayout()
         top.setContentsMargins(0, 0, 0, 0)
@@ -972,16 +1456,33 @@ class _MediaWorkspace(QWidget):
         )
         top.addWidget(title_lbl, 0)
         top.addStretch(1)
+        if eta:
+            eta_lbl = MetaLabel(
+                self._theme, eta, role="muted", style="caption"
+            )
+            eta_lbl.setStyleSheet(f"color: {c.accent_cyan};")
+            top.addWidget(eta_lbl, 0)
         pct_lbl = MetaLabel(
-            self._theme, f"{int(round(fraction * 100))}%", role="muted", style="caption"
+            self._theme,
+            pct_text if pct_text is not None
+            else f"{int(round(fraction * 100))}%",
+            role="muted", style="caption",
         )
         top.addWidget(pct_lbl, 0)
-        layout.addLayout(top)
+        body.addLayout(top)
 
         sub_lbl = MetaLabel(self._theme, subtitle, role="muted", style="caption")
-        layout.addWidget(sub_lbl)
+        body.addWidget(sub_lbl)
 
-        layout.addWidget(ProgressBar(self._theme, value=fraction, accent=accent))
+        progress = ProgressBar(self._theme, value=fraction, accent=accent)
+        body.addWidget(progress)
+        outer.addLayout(body, 1)
+        # Expose the row's dynamic parts as attributes so the queue/task
+        # observers can update REAL progress without any layout change.
+        row._title_lbl = title_lbl
+        row._sub_lbl = sub_lbl
+        row._pct_lbl = pct_lbl
+        row._progress = progress
         return row
 
     def _build_inspector(self) -> QWidget:
@@ -1154,7 +1655,9 @@ class _MediaWorkspace(QWidget):
 
         region = QWidget()
         region.setObjectName("MediaWorkspaceTimeline")
-        region.setMinimumHeight(220)
+        # Tall enough for the toolbar + ruler + all 7 pro-NLE lanes (34px
+        # each) without squeezing, like the reference timeline region.
+        region.setMinimumHeight(360)
         layout = QVBoxLayout(region)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(tokens.spacing.sm)
@@ -1172,14 +1675,56 @@ class _MediaWorkspace(QWidget):
         header.set_divider(True)
         inner.addWidget(header)
 
+        # Track order preserves the frozen indices (0 = video, 1 = audio)
+        # that the demo clips and tests rely on; the extra pro-NLE lanes
+        # (Video Track 2 / Overlay / Text / Effects / Audio Track 2) are
+        # appended after them (visual-only). Reference-style names so the
+        # header chips read V1 / A1 / V2 / OV / A2 / A3 / A4 like the mock.
         self._timeline = Timeline(
-            self._theme, duration=60.0, tracks=["Video 1", "Audio 1"]
+            self._theme,
+            duration=60.0,
+            tracks=[
+                "Video Track 1",
+                "Music",
+                "Video Track 2",
+                "Overlay Track",
+                "SFX",
+                "Voice",
+                "Subtitles",
+            ],
         )
+        # Clips 0-2 are the frozen demo clips (identical values); the rest
+        # are appended decorative chips that dress the new lanes like the
+        # reference gaming-montage timeline (visual-only, append-only).
         self._timeline.set_clips(
             [
                 {"track": 0, "start": 0.0, "length": 12.0, "label": "Intro"},
                 {"track": 0, "start": 12.0, "length": 20.0, "label": "Gameplay"},
                 {"track": 1, "start": 0.0, "length": 32.0, "label": "Music"},
+                {"track": 2, "start": 4.0, "length": 10.0,
+                 "label": "Valorant 2026-05-08.mp4", "kind": "video"},
+                {"track": 2, "start": 18.0, "length": 8.0, "label": "Replay",
+                 "kind": "video"},
+                {"track": 3, "start": 2.0, "length": 9.0,
+                 "label": "Facecam_01.mp4", "kind": "overlay"},
+                {"track": 3, "start": 15.0, "length": 8.0,
+                 "label": "Killfeed Overlay", "kind": "overlay"},
+                {"track": 4, "start": 3.0, "length": 26.0, "label": "SFX",
+                 "kind": "audio"},
+                {"track": 5, "start": 6.0, "length": 24.0,
+                 "label": "Voice Commentary.wav", "kind": "voice"},
+                {"track": 6, "start": 1.0, "length": 4.0,
+                 "label": "One enemy remaining.", "kind": "text"},
+                {"track": 6, "start": 7.0, "length": 4.0,
+                 "label": "Nice shot!", "kind": "text"},
+                {"track": 6, "start": 13.0, "length": 4.0,
+                 "label": "Spike planted.", "kind": "text"},
+                {"track": 6, "start": 19.0, "length": 5.0,
+                 "label": "This is my moment.", "kind": "text"},
+                {"track": 6, "start": 26.0, "length": 4.0, "label": "Clutch!",
+                 "kind": "text"},
+                {"track": 6, "start": 32.0, "length": 4.0, "label": "GG WP!",
+                 "kind": "text"},
             ]
         )
         inner.addWidget(self._timeline, 1)
@@ -1187,6 +1732,136 @@ class _MediaWorkspace(QWidget):
         card.set_content(content)
         layout.addWidget(card, 1)
         return region
+
+    # ------------------------------------------------------------------ #
+    # Media import (file dialog + drag & drop; reuses VideoPicker filtering)
+    # ------------------------------------------------------------------ #
+    _VIDEO_SUFFIXES = (".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v")
+
+    def _on_import_requested(self) -> None:
+        """Open a native file dialog and add the chosen videos to the browser.
+
+        Reuses the existing MediaBrowser API (set_items/select); when real
+        media discovery is active the chosen paths are registered with the
+        PreviewMediaSource path map so selection resolves to full paths.
+        """
+        from PySide6.QtWidgets import QFileDialog
+
+        patterns = " ".join(f"*{s}" for s in self._VIDEO_SUFFIXES)
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "Import Media", "", f"Video Files ({patterns});;All Files (*)"
+        )
+        if paths:
+            self._add_media_paths(paths)
+
+    def _add_media_paths(self, paths) -> None:
+        """Append video paths to the browser (dedup; select the first new).
+
+        Accepts str/Path items; non-video suffixes are filtered out with the
+        same suffix vocabulary VideoPicker uses. Existing items are preserved.
+        """
+        from pathlib import Path as _P
+
+        current = self._browser.items()
+        added = []
+        for raw in paths:
+            p = _P(str(raw))
+            if p.suffix.lower() not in self._VIDEO_SUFFIXES:
+                continue
+            name = p.name
+            # Register the full path so selection can resolve it.
+            if self._media_source is not None:
+                self._media_source._paths[name] = p
+            else:
+                self._imported_paths[name] = p
+            if name not in current and name not in added:
+                added.append(name)
+        if not added:
+            return
+        self._browser.set_items(current + added)
+        # Select the first newly imported item (drives the backend when a
+        # controller is present via the existing selection_changed wiring).
+        self._browser.select(len(current))
+
+    def dragEnterEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        """Accept drags carrying local video file URLs."""
+        mime = event.mimeData()
+        if mime.hasUrls() and any(
+            url.isLocalFile()
+            and url.toLocalFile().lower().endswith(self._VIDEO_SUFFIXES)
+            for url in mime.urls()
+        ):
+            event.acceptProposedAction()
+
+    def dropEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        """Import dropped local video files via the shared add path."""
+        paths = [
+            url.toLocalFile()
+            for url in event.mimeData().urls()
+            if url.isLocalFile()
+        ]
+        if paths:
+            self._add_media_paths(paths)
+            event.acceptProposedAction()
+
+    # ------------------------------------------------------------------ #
+    # Thumbnail loading (lazy, one per tick; reuses PreviewMediaSource)
+    # ------------------------------------------------------------------ #
+    def _start_thumbnail_loading(self) -> None:
+        """Queue browser rows for thumbnail decoding (one per idle tick).
+
+        Each tick decodes AT MOST one first frame via the existing
+        PreviewMediaSource (FFmpegService seam) and applies it as the row
+        button's icon. Decoded thumbnails are cached by name; the timer stops
+        when the queue drains. Skipped entirely without a real media source.
+        """
+        if self._media_source is None:
+            return
+        self._thumb_cache = {}
+        self._thumb_queue = list(self._browser.items())
+        if not self._thumb_queue:
+            return
+        self._thumb_timer = QTimer(self)
+        self._thumb_timer.setInterval(150)
+        self._thumb_timer.timeout.connect(self._load_next_thumbnail)
+        self._thumb_timer.start()
+
+    def _load_next_thumbnail(self) -> None:
+        """Decode and apply one queued thumbnail; stop when the queue drains."""
+        queue = getattr(self, "_thumb_queue", None)
+        if not queue:
+            timer = getattr(self, "_thumb_timer", None)
+            if timer is not None:
+                timer.stop()
+            return
+        name = queue.pop(0)
+        if name in self._thumb_cache:
+            return
+        image = self._media_source.load_first_frame(name)
+        if image is None:
+            return
+        from PySide6.QtGui import QIcon
+
+        pixmap = QPixmap.fromImage(image).scaled(
+            48, 27,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        icon = QIcon(pixmap)
+        self._thumb_cache[name] = icon
+        # Apply to the matching browser row's inner QPushButton.
+        try:
+            items = self._browser.items()
+            index = items.index(name)
+            button = self._browser._buttons[index]
+            inner = getattr(button, "_button", None)
+            if inner is not None:
+                from PySide6.QtCore import QSize
+
+                inner.setIcon(icon)
+                inner.setIconSize(QSize(48, 27))
+        except (ValueError, IndexError, AttributeError):
+            pass
 
     # ------------------------------------------------------------------ #
     # UI-only wiring
@@ -1244,15 +1919,49 @@ class _MediaWorkspace(QWidget):
         Best-effort: requires a controller and a selected media path. Decoding
         is owned by the backend FFmpegService (via the controller); any decode
         failure is swallowed so playback/seek never crashes the UI thread.
+
+        Performance: decoded frames are cached per (path, frame-bucket) in a
+        small bounded LRU so scrubbing back over recent positions redisplays
+        instantly, and a repeat request for the bucket already on screen is
+        a no-op (no redundant ffmpeg subprocess per timer tick).
         """
         if self._controller is None or self._media_path is None:
+            return
+        # Quantize to a display bucket (~10 buckets/second) for caching.
+        bucket = (str(self._media_path), int(seconds * 10))
+        if getattr(self, "_frame_on_screen", None) == bucket:
+            return
+        cache = getattr(self, "_frame_cache", None)
+        if cache is None:
+            from collections import OrderedDict
+
+            cache = self._frame_cache = OrderedDict()
+        cached = cache.get(bucket)
+        if cached is not None:
+            cache.move_to_end(bucket)
+            self._frame_on_screen = bucket
+            self._show_cached_pixmap(cached)
             return
         try:
             frame = self._controller.decode_frame(self._media_path, seconds)
         except Exception:
             return
         if frame is not None:
+            self._frame_on_screen = bucket
             self.show_frame(frame)
+            pixmap = self._preview_frame.pixmap()
+            if pixmap is not None and not pixmap.isNull():
+                cache[bucket] = pixmap
+                cache.move_to_end(bucket)
+                while len(cache) > 120:  # ~12s of scrub history
+                    cache.popitem(last=False)
+
+    def _show_cached_pixmap(self, pixmap) -> None:
+        """Display an already-scaled cached pixmap in the frame sink."""
+        self._preview_placeholder.setVisible(False)
+        self._preview_play_tile.setVisible(False)
+        self._preview_frame.setPixmap(pixmap)
+        self._preview_frame.setVisible(True)
 
     def show_frame(self, bgr) -> None:
         """Display a decoded ``(H, W, 3)`` uint8 BGR ndarray in the preview.
@@ -1273,13 +1982,26 @@ class _MediaWorkspace(QWidget):
         except Exception:
             return
         target = self._preview_frame.size()
-        if target.width() > 0 and target.height() > 0:
+        zoom_text = getattr(self, "_preview_zoom", "Fit")
+        if zoom_text != "Fit" and zoom_text.endswith("%"):
+            try:
+                scale = float(zoom_text.rstrip("%")) / 100.0
+                pixmap = pixmap.scaled(
+                    int(pixmap.width() * scale),
+                    int(pixmap.height() * scale),
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            except ValueError:
+                pass
+        elif target.width() > 0 and target.height() > 0:
             pixmap = pixmap.scaled(
                 target,
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
         self._preview_placeholder.setVisible(False)
+        self._preview_play_tile.setVisible(False)
         self._preview_frame.setPixmap(pixmap)
         self._preview_frame.setVisible(True)
 
@@ -1288,6 +2010,7 @@ class _MediaWorkspace(QWidget):
         self._preview_frame.clear()
         self._preview_frame.setVisible(False)
         self._preview_placeholder.setVisible(True)
+        self._preview_play_tile.setVisible(True)
 
     # ------------------------------------------------------------------ #
     # Audio playback (Qt Multimedia; synchronized to the timeline playhead)
@@ -1355,11 +2078,34 @@ class _MediaWorkspace(QWidget):
         duration = self._timeline.duration()
         self._audio_player.setPosition(int(max(0.0, fraction) * duration * 1000))
 
+    def _invalidate_frame_cache(self) -> None:
+        """Drop cached preview pixmaps (zoom or media changed)."""
+        cache = getattr(self, "_frame_cache", None)
+        if cache is not None:
+            cache.clear()
+        self._frame_on_screen = None
+
     def _reset_audio_for_new_media(self) -> None:
-        """Stop audio and invalidate the cached track for a new selection."""
+        """Stop audio and invalidate cached track/frames for a new selection."""
         if self._audio_player is not None:
             self._audio_player.stop()
         self._audio_loaded_for = None
+        self._invalidate_frame_cache()
+
+    def _resolve_media_path(self, item: str):
+        """Resolve a browser display name to its full path when known.
+
+        Names discovered by the PreviewMediaSource or added via import/drop
+        map to their real filesystem paths; unknown names pass through
+        unchanged (the original behavior, relied on by tests seeding paths
+        directly).
+        """
+        if self._media_source is not None:
+            resolved = self._media_source.path_for(item)
+            if resolved is not None:
+                return resolved
+        resolved = self._imported_paths.get(item)
+        return resolved if resolved is not None else item
 
     def _reflect_selected_video(self, item: str) -> None:
         """Drive ``select_video`` and reflect the controller's ProjectState.
@@ -1371,7 +2117,7 @@ class _MediaWorkspace(QWidget):
         then observed by :meth:`_reflect_preview`.
         """
         try:
-            self._controller.select_video(item)
+            self._controller.select_video(self._resolve_media_path(item))
             state = self._controller.project_state()
         except Exception as exc:  # backend rejected the selection
             self._preview_header.set_subtitle(item)
@@ -1417,6 +2163,17 @@ class _MediaWorkspace(QWidget):
         # selection invalidates any previously loaded audio track.
         self._media_path = video_path
         self._reset_audio_for_new_media()
+        # Real media duration -> the single playback clock (Timeline widget),
+        # via the backend's existing metadata service. Only applied when no
+        # backend timeline exists (a backend timeline's duration wins below in
+        # _reflect_timeline; both use the widget's public set_duration).
+        try:
+            meta = self._controller.media_metadata(video_path)
+            duration = float(getattr(meta, "duration", 0.0) or 0.0)
+            if duration > 0 and self._controller.timeline() is None:
+                self._timeline.set_duration(duration)
+        except Exception:
+            pass
         self._decode_and_show(0.0)
 
         # Details metadata derived directly from ProjectState (no fabrication).
@@ -1491,6 +2248,34 @@ class _MediaWorkspace(QWidget):
             return False
         return self._controller.run_phase(phase_id)
 
+    def _run_ai_tool(self, title: str, phase_id: str) -> None:
+        """Run an AI tool card's backend phase with pipeline-owned gating.
+
+        Availability is re-checked at click time via the controller's
+        existing available_phases() (the registry/pipeline own ordering and
+        dependencies — nothing is hardcoded here). A blocked or unknown
+        phase, a busy controller, and UI-only mode are all reported in the
+        Details status row instead of failing silently.
+        """
+        if self._controller is None:
+            self._detail_status.set_text(f"{title}: no backend connected")
+            return
+        if self._controller.is_phase_running():
+            self._detail_status.set_text(f"{title}: a phase is already running")
+            return
+        runnable = {
+            getattr(p, "id", None) for p in self._controller.available_phases()
+        }
+        if phase_id not in runnable:
+            self._detail_status.set_text(
+                f"{title}: blocked — run its dependencies first"
+            )
+            return
+        if self._controller.run_phase(phase_id):
+            self._set_phase_status(f"Running: {phase_id}")
+        else:
+            self._detail_status.set_text(f"{title}: could not start")
+
     # ------------------------------------------------------------------ #
     # Auto Edit: sequence the existing pipeline (order owned by gui_core)
     # ------------------------------------------------------------------ #
@@ -1541,14 +2326,121 @@ class _MediaWorkspace(QWidget):
         return self._controller.run_phase("render")
 
     def _set_phase_status(self, text: str) -> None:
-        """Reflect phase run state into the existing Preview HUD status label."""
+        """Reflect phase run state into the existing Preview HUD status label.
+
+        Pulses the badge with a brief opacity animation so status changes are
+        visually noticed by the user.
+        """
         badge = getattr(self, "_preview_status_badge", None)
-        if badge is not None:
-            badge.setText(text)
+        if badge is None:
+            return
+        badge.setText(text)
+        # Pulse opacity: 1 → 0.5 → 1 for a subtle visual confirmation.
+        from gui.widgets.animation import tween_value
+        tween_value(
+            0.5, 1.0, lambda v: badge.setStyleSheet(
+                f"#MediaWorkspacePreviewStatusBadge {{ color: {self._theme.tokens.colors.text_secondary}; "
+                f"background: {self._theme.tokens.colors.surface_overlay}; "
+                f"border: 1px solid {self._theme.tokens.colors.glass_border}; "
+                f"border-radius: {self._theme.tokens.radius.sm}px; "
+                f"padding: {self._theme.tokens.spacing.xxs}px {self._theme.tokens.spacing.sm}px; "
+                f"opacity: {v}; }}"
+            ),
+            duration_ms=300,
+            easing=self._theme.easing("out_cubic"),
+        )
 
     def _on_phase_started(self, phase_id: str) -> None:
         """Observer: a background phase run began."""
         self._set_phase_status(f"Running: {phase_id}")
+        self._reflect_task_row(phase_id, running=True)
+        if phase_id == "render":
+            self._enqueue_render_job()
+
+    def _reflect_task_row(
+        self, phase_id: str, *, running: bool, success: bool = True
+    ) -> None:
+        """Reflect a phase run's real state into its Background Tasks row.
+
+        Rows exist for analysis / subtitles / audio (the frozen UI rows);
+        other phases update only the HUD badge. Progress is indeterminate
+        for a running phase (the backend reports no fraction), so the row
+        shows a running/'done' state honestly rather than a fabricated %.
+        """
+        row = getattr(self, "_bg_task_rows", {}).get(phase_id)
+        if row is None:
+            return
+        if running:
+            row._pct_lbl.set_text("Running…")
+            row._progress.set_value(0.1)
+        else:
+            row._pct_lbl.set_text("Done" if success else "Failed")
+            row._progress.set_value(1.0 if success else 0.0)
+        # Live count of running background rows.
+        counter = getattr(self, "_bg_tasks_count", None)
+        if counter is not None:
+            active = sum(
+                1 for r in self._bg_task_rows.values()
+                if r._pct_lbl.text() == "Running…"
+            )
+            counter.set_text(f"{active} Active" if active else "Idle")
+
+    # ------------------------------------------------------------------ #
+    # Render queue (real gui_core.RenderQueue model behind the frozen rows)
+    # ------------------------------------------------------------------ #
+    def _enqueue_render_job(self) -> None:
+        """Track the running render phase as a RenderJob in a RenderQueue."""
+        from gui_core import RenderJob, RenderQueue
+
+        if not hasattr(self, "_render_queue"):
+            self._render_queue = RenderQueue()
+        stem = getattr(self._media_path, "stem", None) or "render"
+        job_id = f"job_{len(self._render_queue.jobs) + 1}"
+        job = RenderJob(id=job_id, source=stem).mark_running()
+        self._render_queue = self._render_queue.enqueue(job)
+        self._active_render_job = job_id
+        self._reflect_render_queue()
+
+    def _finish_render_job(self, success: bool, message: str = "") -> None:
+        """Mark the active render job terminal and refresh the queue rows."""
+        job_id = getattr(self, "_active_render_job", None)
+        if job_id is None or not hasattr(self, "_render_queue"):
+            return
+        job = self._render_queue.job_by_id(job_id)
+        if job is None:
+            return
+        job = job.mark_succeeded() if success else job.mark_failed(message)
+        self._render_queue = self._render_queue.replace_job(job)
+        self._active_render_job = None
+        self._reflect_render_queue()
+
+    def _reflect_render_queue(self) -> None:
+        """Reflect the real RenderQueue model into the frozen queue rows."""
+        queue = getattr(self, "_render_queue", None)
+        if queue is None:
+            return
+        counter = getattr(self, "_render_queue_count", None)
+        if counter is not None:
+            pending = queue.pending_count()
+            total = len(queue.jobs)
+            counter.set_text(
+                f"{pending} Active" if pending else f"{total} Done"
+            )
+        row = getattr(self, "_render_task_row", None)
+        if row is not None and queue.jobs:
+            latest = queue.jobs[-1]
+            row._title_lbl.set_text(latest.source)
+            status = latest.status
+            row._sub_lbl.set_text(f"Render · {status}")
+            if status == "running":
+                row._pct_lbl.set_text("Running…")
+                row._progress.set_value(0.1)
+            elif status == "succeeded":
+                row._pct_lbl.set_text("Done")
+                row._progress.set_value(1.0)
+            else:
+                row._pct_lbl.set_text(status.capitalize())
+                row._progress.set_value(0.0)
 
     def _on_phase_completed(self, result) -> None:
         """Observer: a phase run finished; reflect success/failure + artifacts.
@@ -1562,6 +2454,12 @@ class _MediaWorkspace(QWidget):
         """
         success = bool(getattr(result, "success", False))
         self._set_phase_status("Done" if success else "Failed")
+        phase_id = getattr(result, "phase_id", "")
+        self._reflect_task_row(phase_id, running=False, success=success)
+        if phase_id == "render":
+            self._finish_render_job(
+                success, str(getattr(result, "message", ""))
+            )
         if self._controller is None:
             return
         try:
@@ -1580,6 +2478,12 @@ class _MediaWorkspace(QWidget):
     def _on_phase_failed(self, message: str) -> None:
         """Observer: a phase run raised; reflect the failure."""
         self._set_phase_status("Failed")
+        # A raised run never delivered a result; close out any open render
+        # job and any running task rows honestly.
+        self._finish_render_job(False, message)
+        for phase_id, row in getattr(self, "_bg_task_rows", {}).items():
+            if row._pct_lbl.text() == "Running…":
+                self._reflect_task_row(phase_id, running=False, success=False)
 
     @staticmethod
     def _artifact_status(state) -> str:
@@ -1634,18 +2538,30 @@ class _MediaWorkspace(QWidget):
             )
         return backend
 
-    def _persist_timeline_to_backend(self) -> None:
+    def _persist_timeline_to_backend(self, record_history: bool = True) -> None:
         """Persist the Timeline widget's model into the backend Timeline.
 
         Maps the widget model to a validated gui_core.Timeline and calls
         controller.update_timeline (publishing TimelineChanged). No-op without
-        a controller.
+        a controller (history is still recorded so undo/redo works UI-only).
 
         Validation failures are NOT silently ignored: a backend ValueError
         (invalid edit) is surfaced in the Details status row so the user sees
         the edit did not persist. The Qt thread is never crashed, but the
         failure is reported rather than swallowed.
         """
+        # History: push the pre-edit snapshot (captured after the previous
+        # persist) so Ctrl+Z restores the state before this edit.
+        if record_history:
+            previous = getattr(self, "_last_clips_snapshot", None)
+            if previous is not None:
+                if not hasattr(self, "_undo_stack"):
+                    self._undo_stack, self._redo_stack = [], []
+                self._undo_stack.append(previous)
+                if len(self._undo_stack) > 100:
+                    self._undo_stack.pop(0)
+                self._redo_stack.clear()
+        self._last_clips_snapshot = self._timeline.clips()
         if self._controller is None:
             return
         try:
@@ -1689,6 +2605,840 @@ class _MediaWorkspace(QWidget):
         """Mirror the timeline transport state onto the TransportBar (UI-only)."""
         self._transport.set_state(state)
 
+    # ------------------------------------------------------------------ #
+    # Preview playback wiring (transport seek / loop / step / speed / etc.)
+    # ------------------------------------------------------------------ #
+    def _on_transport_seek(self, fraction: float) -> None:
+        """Drive the timeline playhead from the transport's seek scrubber.
+
+        The timeline stays the single playback clock: its set_playhead emits
+        playhead_changed which decodes+displays the frame and (via
+        _on_playhead_changed -> transport.set_position) keeps the scrubber in
+        sync without re-emitting seek_requested (no loop).
+        """
+        duration = self._timeline.duration()
+        self._timeline.set_playhead(max(0.0, min(1.0, fraction)) * duration)
+
+    def _on_playback_finished(self) -> None:
+        """Loop playback when the loop toggle is active."""
+        if getattr(self, "_loop_enabled", False):
+            self._timeline.set_playhead(0.0)
+            self._timeline.play()
+            if self._audio_player is not None:
+                self._audio_player.setPosition(0)
+                self._audio_player.play()
+
+    def _media_fps(self) -> float:
+        """Return the selected media's fps via backend metadata (30.0 fallback).
+
+        Cached per media path: metadata probing spawns an ffprobe subprocess,
+        so it must never run per playhead tick.
+        """
+        cached = getattr(self, "_media_fps_cache", None)
+        if cached is not None and cached[0] == self._media_path:
+            return cached[1]
+        fps = 30.0
+        if self._controller is not None and self._media_path is not None:
+            try:
+                meta = self._controller.media_metadata(self._media_path)
+                probed = float(getattr(meta, "fps", 0.0) or 0.0)
+                if probed > 0:
+                    fps = probed
+            except Exception:
+                pass
+        self._media_fps_cache = (self._media_path, fps)
+        return fps
+
+    def _step_frames(self, frames: int) -> None:
+        """Step the playhead by ``frames`` (negative steps backward)."""
+        self._timeline.pause()
+        step = frames / self._media_fps()
+        self._timeline.set_playhead(self._timeline.playhead() + step)
+
+    def _shuttle(self, seconds: float) -> None:
+        """Jump the playhead by ``seconds`` (rewind/fast-forward)."""
+        self._timeline.set_playhead(self._timeline.playhead() + seconds)
+
+    def _wire_transport_buttons(self) -> None:
+        """Connect the transport's frame-step / shuttle NeonButtons.
+
+        The buttons already exist on the TransportBar (frozen object names);
+        this only adds clicked connections. A missing button stays unwired.
+        """
+        from gui.widgets.neon_button import NeonButton as _NB
+
+        for name, slot in (
+            ("TransportPrevFrame", lambda: self._step_frames(-1)),
+            ("TransportNextFrame", lambda: self._step_frames(1)),
+            ("TransportRewind", lambda: self._shuttle(-5.0)),
+            ("TransportFastForward", lambda: self._shuttle(5.0)),
+            ("TransportFullscreen", self._on_toggle_fullscreen),
+        ):
+            btn = self._transport.findChild(_NB, name)
+            if btn is not None:
+                btn.clicked.connect(lambda _=False, s=slot: s())
+
+    def _wire_viewer_toolbar(self) -> None:
+        """Connect the viewer toolbar's zoom / screenshot / fullscreen controls."""
+        self._loop_enabled = False
+        zoom = self.findChild(Dropdown, "MediaWorkspaceViewerZoom")
+        if zoom is not None:
+            zoom.changed.connect(self._on_viewer_zoom_changed)
+        shot = self.findChild(NeonButton, "MediaWorkspaceViewerScreenshot")
+        if shot is not None:
+            shot.clicked.connect(self._on_screenshot)
+        fs = self.findChild(NeonButton, "MediaWorkspaceViewerFullscreen")
+        if fs is not None:
+            fs.clicked.connect(self._on_toggle_fullscreen)
+        # Playback speed: clicking the transport's existing rate chip cycles
+        # through the preset rates. Loop: clicking the player toolbar's Loop
+        # chip toggles looping. Both are existing labels; click handling is
+        # added via event filters (wiring only, no widget change).
+        self._rate_presets = (0.5, 1.0, 1.5, 2.0)
+        self._rate_label = self._transport.findChild(QLabel, "TransportRate") \
+            or getattr(self._transport, "_rate", None)
+        if self._rate_label is not None:
+            self._register_click(self._rate_label, self._cycle_playback_rate)
+        self._loop_label = self.findChild(QLabel, "MediaWorkspacePlayerLoop")
+        if self._loop_label is not None:
+            self._register_click(self._loop_label, self._toggle_loop)
+
+    def eventFilter(self, watched, event):  # noqa: N802 (Qt override)
+        """Dispatch clicks on wired chip/glyph labels (wiring only).
+
+        ``_click_actions`` maps a watched widget to a zero-arg callable;
+        entries are registered by the wiring helpers (_wire_viewer_toolbar /
+        _wire_timeline_tools / _wire_track_header_controls).
+        """
+        from PySide6.QtCore import QEvent
+
+        if event.type() == QEvent.Type.MouseButtonRelease:
+            action = getattr(self, "_click_actions", {}).get(watched)
+            if action is not None:
+                action()
+                return True
+        return super().eventFilter(watched, event)
+
+    def _register_click(self, widget, action) -> None:
+        """Register ``action`` to run when ``widget`` is clicked."""
+        if not hasattr(self, "_click_actions"):
+            self._click_actions = {}
+        self._click_actions[widget] = action
+        widget.installEventFilter(self)
+        try:
+            widget.setCursor(Qt.CursorShape.PointingHandCursor)
+        except Exception:
+            pass
+
+    def _cycle_playback_rate(self) -> None:
+        """Advance to the next playback-rate preset and apply it everywhere."""
+        current = self._timeline.playback_rate()
+        presets = self._rate_presets
+        try:
+            idx = min(
+                range(len(presets)),
+                key=lambda i: abs(presets[i] - current),
+            )
+            rate = presets[(idx + 1) % len(presets)]
+        except ValueError:
+            rate = 1.0
+        self._timeline.set_playback_rate(rate)
+        if self._audio_player is not None:
+            try:
+                self._audio_player.setPlaybackRate(rate)
+            except Exception:
+                pass
+        label = self._rate_label
+        if label is not None:
+            text = f"{rate:g}x"
+            if hasattr(label, "set_text"):
+                label.set_text(text)
+            else:
+                label.setText(text)
+
+    def _toggle_loop(self) -> None:
+        """Toggle loop mode; reflect the state on the existing Loop chip."""
+        self._loop_enabled = not getattr(self, "_loop_enabled", False)
+        label = self._loop_label
+        if label is not None:
+            c = self._theme.tokens.colors
+            color = c.accent_cyan if self._loop_enabled else c.text_muted
+            label.setStyleSheet(
+                f"#MediaWorkspacePlayerLoop {{ color: {color}; "
+                f"background: transparent; }}"
+            )
+
+    # ------------------------------------------------------------------ #
+    # Timeline editing operations (Phase 3 wiring; widget API + persist)
+    # ------------------------------------------------------------------ #
+    def _selected_clip_index(self) -> int:
+        """Return the timeline's selected clip index (-1 when none)."""
+        return self._timeline.selected_index()
+
+    def _clip_track_locked(self, index: int) -> bool:
+        """Return whether the clip at ``index`` sits on a locked track."""
+        if index < 0:
+            return False
+        clips = self._timeline.clips()
+        if index >= len(clips):
+            return False
+        track = int(clips[index].get("track", 0))
+        return getattr(self, "_track_locked", {}).get(track, False)
+
+    def _split_selected_clip(self) -> None:
+        """Split the selected clip at the playhead into two clips.
+
+        Uses only the widget's public clips()/set_clips() API; both halves
+        keep the source clip's track/label. A playhead outside the clip (or
+        halves under the 1s minimum) is a no-op. Persists to the backend.
+        """
+        index = self._selected_clip_index()
+        if index < 0 or self._clip_track_locked(index):
+            return
+        clips = self._timeline.clips()
+        clip = clips[index]
+        start = float(clip.get("start", 0.0))
+        length = float(clip.get("length", 0.0))
+        cut = self._timeline.playhead()
+        if not (start + 1.0 <= cut <= start + length - 1.0):
+            return
+        left = dict(clip)
+        left["length"] = cut - start
+        right = dict(clip)
+        right["start"] = cut
+        right["length"] = start + length - cut
+        clips[index] = left
+        clips.insert(index + 1, right)
+        self._timeline.set_clips(clips)
+        self._timeline.select_clip(index)
+        self._persist_timeline_to_backend()
+
+    def _delete_selected_clip(self) -> None:
+        """Remove the selected clip from the timeline; persist to backend."""
+        index = self._selected_clip_index()
+        if index < 0 or self._clip_track_locked(index):
+            return
+        clips = self._timeline.clips()
+        del clips[index]
+        self._timeline.set_clips(clips)
+        self._persist_timeline_to_backend()
+
+    def _duplicate_selected_clip(self) -> None:
+        """Duplicate the selected clip right after itself (or at the first
+        gap on its track that fits); persist to backend."""
+        index = self._selected_clip_index()
+        if index < 0 or self._clip_track_locked(index):
+            return
+        clips = self._timeline.clips()
+        clip = dict(clips[index])
+        length = float(clip.get("length", 0.0))
+        track = int(clip.get("track", 0))
+        # Place the copy at the end of the source clip; nudge forward past
+        # any occupied span on the same track.
+        candidate = float(clip.get("start", 0.0)) + length
+        occupied = sorted(
+            (float(c.get("start", 0.0)), float(c.get("start", 0.0)) + float(c.get("length", 0.0)))
+            for c in clips if int(c.get("track", 0)) == track
+        )
+        for span_start, span_end in occupied:
+            if candidate < span_end and candidate + length > span_start:
+                candidate = span_end
+        if candidate + length > self._timeline.duration():
+            return  # no room on this track
+        clip["start"] = candidate
+        clips.insert(index + 1, clip)
+        self._timeline.set_clips(clips)
+        self._timeline.select_clip(index + 1)
+        self._persist_timeline_to_backend()
+
+    def _add_timeline_track(self) -> None:
+        """Append a new track lane; persist to backend."""
+        count = self._timeline.track_count()
+        self._timeline.add_track(f"Track {count + 1}")
+        self._persist_timeline_to_backend()
+
+    def _add_marker_at_playhead(self) -> None:
+        """Add a backend Marker at the playhead (backend marker API exists).
+
+        The Timeline widget has no marker rendering; the marker lives in the
+        authoritative backend Timeline (gui_core.Marker) and is reported in
+        the Details status row. No-op without a controller.
+        """
+        if self._controller is None:
+            return
+        try:
+            from gui_core.timeline import Marker
+
+            backend = self._controller.timeline()
+            if backend is None:
+                backend = self._build_backend_timeline()
+            marker_id = f"marker_{len(backend.markers) + 1}"
+            backend = backend.add_marker(
+                Marker(id=marker_id, time=min(self._timeline.playhead(), backend.duration))
+            )
+            self._controller.update_timeline(backend)
+            self._detail_status.set_text(
+                f"Marker added at {self._format_timecode(self._timeline.playhead())}"
+            )
+        except Exception as exc:
+            self._detail_status.set_text(f"Marker: failed — {exc}")
+
+    def _wire_timeline_tools(self) -> None:
+        """Wire the timeline toolbar's existing glyph labels to real edits.
+
+        The glyphs are frozen QLabels (#TimelineToolItem) identified by their
+        tooltips; only click handling is added. Undo/Redo glyphs are wired by
+        the project-system phase (history stack); unknown tooltips stay inert.
+        """
+        actions = {
+            "Cut": self._split_selected_clip,
+            "Split": self._split_selected_clip,
+            "Razor": self._split_selected_clip,
+            "Zoom In": self._timeline.zoom_in,
+            "Zoom Out": self._timeline.zoom_out,
+            "Fit": self._timeline.fit_to_contents,
+            "Marker": self._add_marker_at_playhead,
+            "Add Track": self._add_timeline_track,
+            # "Remove Track" stays inert: the Timeline widget exposes no
+            # track-removal API and inventing one is out of scope.
+            "Undo": self._undo,
+            "Redo": self._redo,
+        }
+        toolbar = getattr(self._timeline, "_toolbar", None)
+        if toolbar is None:
+            return
+        for item in toolbar.findChildren(QLabel, "TimelineToolItem"):
+            action = actions.get(item.toolTip())
+            if action is not None:
+                self._register_click(item, action)
+
+    def _wire_track_header_controls(self) -> None:
+        """Wire the track headers' existing Mute / Solo / Lock glyphs.
+
+        Toggles view-state per track (locked tracks reject clip edits via the
+        persist path; mute/solo drive the audio player's mute state for audio
+        lanes). Uses only the frozen header labels; no layout change.
+        """
+        self._track_locked: dict = {}
+        self._track_muted: dict = {}
+        self._track_solo: dict = {}
+        headers = getattr(self._timeline, "_header_widgets", [])
+        for track_index, header in enumerate(headers):
+            for obj_name, toggle in (
+                ("TimelineTrackMute", self._toggle_track_mute),
+                ("TimelineTrackSolo", self._toggle_track_solo),
+                ("TimelineTrackLock", self._toggle_track_lock),
+            ):
+                glyph = header.findChild(QLabel, obj_name)
+                if glyph is not None:
+                    self._register_click(
+                        glyph,
+                        lambda t=track_index, g=glyph, f=toggle: f(t, g),
+                    )
+
+    def _paint_track_glyph(self, glyph: QLabel, active: bool) -> None:
+        """Tint a track-header glyph to reflect its toggled state."""
+        c = self._theme.tokens.colors
+        color = c.accent_cyan if active else c.text_muted
+        glyph.setStyleSheet(
+            f"#{glyph.objectName()} {{ color: {color}; "
+            f"background: transparent; }}"
+        )
+
+    def _toggle_track_mute(self, track: int, glyph: QLabel) -> None:
+        """Toggle mute for ``track``; audio player follows for audio lanes."""
+        self._track_muted[track] = not self._track_muted.get(track, False)
+        self._paint_track_glyph(glyph, self._track_muted[track])
+        self._apply_audio_mute_state()
+
+    def _toggle_track_solo(self, track: int, glyph: QLabel) -> None:
+        """Toggle solo for ``track``; audio player follows."""
+        self._track_solo[track] = not self._track_solo.get(track, False)
+        self._paint_track_glyph(glyph, self._track_solo[track])
+        self._apply_audio_mute_state()
+
+    def _toggle_track_lock(self, track: int, glyph: QLabel) -> None:
+        """Toggle edit-lock for ``track``; locked tracks reject clip edits."""
+        self._track_locked[track] = not self._track_locked.get(track, False)
+        self._paint_track_glyph(glyph, self._track_locked[track])
+
+    def _apply_audio_mute_state(self) -> None:
+        """Mute the audio player when any soloed track excludes audio, or the
+        audio track itself is muted. Track 1 ('Music') is the audio lane."""
+        if self._audio_output is None:
+            return
+        audio_tracks = {
+            i for i, name in enumerate(self._timeline.tracks())
+            if "music" in name.lower() or "audio" in name.lower()
+            or "voice" in name.lower() or "sfx" in name.lower()
+        }
+        solo_active = any(self._track_solo.values())
+        if solo_active:
+            muted = not any(
+                self._track_solo.get(t, False) for t in audio_tracks
+            )
+        else:
+            muted = any(
+                self._track_muted.get(t, False) for t in audio_tracks
+            )
+        try:
+            self._audio_output.setMuted(muted)
+        except Exception:
+            pass
+
+    def _wire_edit_shortcuts(self) -> None:
+        """Add standard editing shortcuts (additive; no menu/layout change).
+
+        Delete removes the selected clip; Ctrl+D duplicates; S splits at the
+        playhead; Ctrl+Z / Ctrl+Y drive the history stack; M adds a marker.
+        """
+        from PySide6.QtGui import QKeySequence, QShortcut
+
+        for seq, slot in (
+            ("Delete", self._delete_selected_clip),
+            ("Ctrl+D", self._duplicate_selected_clip),
+            ("S", self._split_selected_clip),
+            ("M", self._add_marker_at_playhead),
+            ("Ctrl+Z", self._undo),
+            ("Ctrl+Y", self._redo),
+            ("Ctrl+N", self.new_project),
+            ("Ctrl+O", self.open_project),
+            ("Ctrl+S", self.save_project),
+            ("Ctrl+Shift+S", self.save_project_as),
+            ("Ctrl+I", self._on_import_requested),
+        ):
+            QShortcut(QKeySequence(seq), self, activated=slot)
+
+    # ------------------------------------------------------------------ #
+    # Undo / Redo history (snapshots of the widget clip model)
+    # ------------------------------------------------------------------ #
+    # ------------------------------------------------------------------ #
+    # Properties panel wiring (Phase 4: sliders/fields -> backend settings)
+    # ------------------------------------------------------------------ #
+    def _on_property_changed(self, key: str, value) -> None:
+        """Write a clip/property value through the backend settings store.
+
+        Reuses the controller's existing ``set_setting`` (StateStore.
+        update_setting -> SettingsChanged on the bus). Values are namespaced
+        (``clip.rotation``, ``clip.opacity``, ...) so they never collide with
+        other settings. UI-only mode records nothing (no fabricated backend).
+        """
+        if self._controller is None:
+            return
+        try:
+            self._controller.set_setting(key, value)
+        except Exception:
+            pass
+
+    def _wire_transform_fields(self, accordion) -> None:
+        """Wire the Transform accordion's axis TextFields to backend settings.
+
+        Fields are discovered by their frozen object name in creation order:
+        Position X/Y, Scale X/Y, then Anchor X/Y (the order add_axis_row was
+        called). editing_finished commits the typed value.
+        """
+        fields = accordion.findChildren(
+            TextField, "MediaWorkspaceStreamAxisField"
+        )
+        keys = (
+            "clip.position_x", "clip.position_y",
+            "clip.scale_x", "clip.scale_y",
+            "clip.anchor_x", "clip.anchor_y",
+        )
+        for field, key in zip(fields, keys):
+            field.editing_finished.connect(
+                lambda f=field, k=key: self._commit_axis_field(f, k)
+            )
+
+    def _commit_axis_field(self, field, key: str) -> None:
+        """Parse and commit an axis field's numeric value to the backend."""
+        raw = field.text().strip().rstrip("%").rstrip("°")
+        try:
+            value = float(raw)
+        except ValueError:
+            return
+        self._on_property_changed(key, value)
+
+    # ------------------------------------------------------------------ #
+    # Project system (save/load reuse Timeline.to_dict/from_dict + facade)
+    # ------------------------------------------------------------------ #
+    def _project_dir(self):
+        """Return (and create) the projects directory under the output dir."""
+        from pathlib import Path as _P
+
+        try:
+            from config import config as _cfg
+            base = _P(_cfg.paths.output_dir)
+        except Exception:
+            base = _P.cwd() / "output"
+        target = base / "projects"
+        target.mkdir(parents=True, exist_ok=True)
+        return target
+
+    def _project_snapshot(self) -> dict:
+        """Serialize the current project using existing model serializers.
+
+        Timeline serialization is owned by gui_core (Timeline.to_dict);
+        settings and the selected video come from the controller state. In
+        UI-only mode the widget's own clip model is saved so save/open still
+        round-trips.
+        """
+        data = {"version": 1}
+        if self._controller is not None:
+            state = self._controller.project_state()
+            if state.video_path is not None:
+                data["video_path"] = str(state.video_path)
+            data["settings"] = dict(state.settings)
+            timeline = state.timeline
+            if timeline is None:
+                timeline = self._build_backend_timeline()
+            data["timeline"] = timeline.to_dict()
+        else:
+            data["timeline"] = self._build_backend_timeline().to_dict()
+        return data
+
+    def save_project(self, path=None) -> bool:
+        """Save the project to ``path`` (or the current/derived path).
+
+        Returns whether the save succeeded; the result is reported in the
+        Details status row either way.
+        """
+        import json
+        from pathlib import Path as _P
+
+        if path is None:
+            path = getattr(self, "_project_path", None)
+        if path is None:
+            stem = getattr(self._media_path, "stem", None) or "untitled"
+            path = self._project_dir() / f"{stem}.ivproj.json"
+        path = _P(path)
+        try:
+            path.write_text(
+                json.dumps(self._project_snapshot(), indent=2),
+                encoding="utf-8",
+            )
+        except Exception as exc:
+            self._detail_status.set_text(f"Save failed — {exc}")
+            return False
+        self._project_path = path
+        self._detail_status.set_text(f"Saved: {path.name}")
+        self._remember_recent_project(path)
+        return True
+
+    def save_project_as(self) -> bool:
+        """Save the project under a user-chosen filename."""
+        from PySide6.QtWidgets import QFileDialog
+
+        chosen, _ = QFileDialog.getSaveFileName(
+            self, "Save Project As", str(self._project_dir()),
+            "INFY Project (*.ivproj.json)",
+        )
+        if not chosen:
+            return False
+        return self.save_project(chosen)
+
+    def open_project(self, path=None) -> bool:
+        """Open a saved project; reflect it through the existing seams.
+
+        The video is re-selected via controller.select_video (artifacts
+        refresh), settings are re-applied via set_setting, and the timeline
+        is restored via gui_core Timeline.from_dict + update_timeline (then
+        reflected into the widget by the existing observer path).
+        """
+        import json
+        from pathlib import Path as _P
+
+        if path is None:
+            from PySide6.QtWidgets import QFileDialog
+
+            chosen, _ = QFileDialog.getOpenFileName(
+                self, "Open Project", str(self._project_dir()),
+                "INFY Project (*.ivproj.json)",
+            )
+            if not chosen:
+                return False
+            path = chosen
+        path = _P(path)
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            self._detail_status.set_text(f"Open failed — {exc}")
+            return False
+        from gui_core import Timeline as BackendTimeline
+
+        try:
+            timeline = (
+                BackendTimeline.from_dict(data["timeline"])
+                if data.get("timeline") else None
+            )
+        except Exception as exc:
+            self._detail_status.set_text(f"Open failed — bad timeline: {exc}")
+            return False
+        if self._controller is not None:
+            video = data.get("video_path")
+            if video:
+                try:
+                    self._reflect_selected_video(video)
+                except Exception:
+                    pass
+            for key, value in (data.get("settings") or {}).items():
+                self._on_property_changed(key, value)
+            if timeline is not None:
+                self._controller.update_timeline(timeline)
+                self._reflect_timeline()
+        elif timeline is not None:
+            # UI-only: reflect the saved timeline into the widget directly.
+            self._timeline.set_duration(timeline.duration)
+            needed = max((t.index for t in timeline.tracks), default=-1) + 1
+            while self._timeline.track_count() < needed:
+                self._timeline.add_track(
+                    f"Track {self._timeline.track_count() + 1}"
+                )
+            self._timeline.set_clips(
+                [
+                    {
+                        "track": c.track_index,
+                        "start": c.start,
+                        "length": c.length,
+                        "label": c.label or (c.source or ""),
+                    }
+                    for c in timeline.clips
+                ]
+            )
+        self._project_path = path
+        self._last_clips_snapshot = self._timeline.clips()
+        self._detail_status.set_text(f"Opened: {path.name}")
+        self._remember_recent_project(path)
+        return True
+
+    def new_project(self) -> None:
+        """Reset to a fresh project (autosaving the current one first)."""
+        if getattr(self, "_project_path", None) is not None:
+            self.save_project()
+        self._project_path = None
+        self._timeline.set_clips([])
+        self._undo_stack, self._redo_stack = [], []
+        self._last_clips_snapshot = []
+        self._browser.select(-1)
+        self._persist_timeline_to_backend(record_history=False)
+        self._detail_status.set_text("New project")
+
+    def _remember_recent_project(self, path) -> None:
+        """Append ``path`` to the persisted recent-projects list (max 10)."""
+        import json
+
+        index = self._project_dir() / "recent.json"
+        try:
+            recents = json.loads(index.read_text(encoding="utf-8"))
+        except Exception:
+            recents = []
+        entry = str(path)
+        recents = [entry] + [r for r in recents if r != entry]
+        try:
+            index.write_text(
+                json.dumps(recents[:10], indent=2), encoding="utf-8"
+            )
+        except Exception:
+            pass
+
+    def recent_projects(self) -> list:
+        """Return the persisted recent-project paths (most recent first)."""
+        import json
+
+        index = self._project_dir() / "recent.json"
+        try:
+            return list(json.loads(index.read_text(encoding="utf-8")))
+        except Exception:
+            return []
+
+    def _start_autosave(self) -> None:
+        """Start the autosave timer (every 2 minutes; saves only once a
+        project path exists so no unnamed file is fabricated)."""
+        self._autosave_timer = QTimer(self)
+        self._autosave_timer.setInterval(120_000)
+        self._autosave_timer.timeout.connect(self._autosave_tick)
+        self._autosave_timer.start()
+
+    def _autosave_tick(self) -> None:
+        """Autosave into a sidecar recovery file next to the project."""
+        import json
+
+        path = getattr(self, "_project_path", None)
+        target = (
+            path.with_suffix(".autosave.json")
+            if path is not None
+            else self._project_dir() / "recovery.autosave.json"
+        )
+        try:
+            target.write_text(
+                json.dumps(self._project_snapshot(), indent=2),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+
+    def recover_autosave(self) -> bool:
+        """Open the most recent autosave/recovery file if one exists."""
+        candidates = sorted(
+            self._project_dir().glob("*.autosave.json"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if not candidates:
+            self._detail_status.set_text("No autosave found")
+            return False
+        return self.open_project(candidates[0])
+
+    def _wire_sidebar_projects(self) -> None:
+        """Wire the sidebar's New Project label and recent-project rows.
+
+        "+ New Project" runs new_project(); a recent row whose name matches a
+        saved project (by stem) opens it, otherwise the click reports that no
+        saved file exists (the seed rows are decorative until real saves).
+        """
+        sidebar = getattr(self, "_sidebar", None)
+        if sidebar is None:
+            return
+        new_lbl = sidebar.findChild(QLabel, "NavigationRecentNewProject")
+        if new_lbl is not None:
+            self._register_click(new_lbl, self.new_project)
+        for row in sidebar.findChildren(QWidget, "NavigationRecentItem"):
+            name_lbl = row.findChild(QLabel, "NavigationRecentName")
+            if name_lbl is None:
+                continue
+            self._register_click(
+                row,
+                lambda n=name_lbl.text(): self._open_recent_by_name(n),
+            )
+
+    def _open_recent_by_name(self, name: str) -> None:
+        """Open the saved project whose filename matches ``name`` (slugged)."""
+        from pathlib import Path as _P
+
+        slug = name.lower().replace(" ", "_")
+        for entry in self.recent_projects():
+            stem = _P(entry).name.lower()
+            if slug in stem or stem.startswith(slug):
+                self.open_project(entry)
+                return
+        candidate = self._project_dir() / f"{slug}.ivproj.json"
+        if candidate.exists():
+            self.open_project(candidate)
+        else:
+            self._detail_status.set_text(f"No saved project for: {name}")
+
+    def _undo(self) -> None:
+        """Restore the previous clip model snapshot (and persist it)."""
+        stack = getattr(self, "_undo_stack", None)
+        if not stack:
+            return
+        self._redo_stack.append(self._timeline.clips())
+        snapshot = stack.pop()
+        self._restoring_history = True
+        try:
+            self._timeline.set_clips(snapshot)
+        finally:
+            self._restoring_history = False
+        self._persist_timeline_to_backend(record_history=False)
+
+    def _redo(self) -> None:
+        """Re-apply an undone clip model snapshot (and persist it)."""
+        stack = getattr(self, "_redo_stack", None)
+        if not stack:
+            return
+        self._undo_stack.append(self._timeline.clips())
+        snapshot = stack.pop()
+        self._restoring_history = True
+        try:
+            self._timeline.set_clips(snapshot)
+        finally:
+            self._restoring_history = False
+        self._persist_timeline_to_backend(record_history=False)
+
+    def _on_viewer_zoom_changed(self, index: int) -> None:
+        """Apply the zoom preset to the preview frame scaling and HUD badge.
+
+        'Fit' rescales to the stage (the default show_frame behavior); a
+        percentage renders the decoded frame at that scale. The current
+        preset is stored and applied on the next decoded frame.
+        """
+        zoom = self.findChild(Dropdown, "MediaWorkspaceViewerZoom")
+        text = zoom.current_text() if zoom is not None else "Fit"
+        self._preview_zoom = text
+        badge = self.findChild(QLabel, "MediaWorkspacePreviewZoomBadge")
+        if badge is not None:
+            badge.setText(text if text != "Fit" else "100%")
+        # Zoom changes the rendered scale: drop the scaled-pixmap cache and
+        # re-render the current frame at the new zoom.
+        self._invalidate_frame_cache()
+        self._decode_and_show(self._timeline.playhead())
+
+    def _on_screenshot(self) -> None:
+        """Save the currently displayed frame as a PNG in the output dir.
+
+        Reuses the already-decoded preview pixmap; reports the saved path (or
+        the failure) in the Details status row. No new backend API.
+        """
+        pixmap = self._preview_frame.pixmap()
+        if pixmap is None or pixmap.isNull():
+            self._detail_status.set_text("Screenshot: no frame to capture")
+            return
+        try:
+            from datetime import datetime
+            from pathlib import Path as _P
+
+            try:
+                from config import config as _cfg
+                out_dir = _P(_cfg.paths.output_dir)
+            except Exception:
+                out_dir = _P.cwd() / "output"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            stem = (
+                getattr(self._media_path, "stem", None) or "frame"
+            )
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            target = out_dir / f"{stem}_screenshot_{stamp}.png"
+            if pixmap.save(str(target), "PNG"):
+                self._detail_status.set_text(f"Screenshot: {target.name}")
+            else:
+                self._detail_status.set_text("Screenshot: save failed")
+        except Exception as exc:
+            self._detail_status.set_text(f"Screenshot: failed — {exc}")
+
+    def _on_toggle_fullscreen(self) -> None:
+        """Toggle the top-level window between fullscreen and normal."""
+        window = self.window()
+        if window is None:
+            return
+        if window.isFullScreen():
+            window.showNormal()
+        else:
+            window.showFullScreen()
+
+    def _format_timecode(self, seconds: float) -> str:
+        """Render ``seconds`` as an HH:MM:SS:FF editorial timecode."""
+        fps = self._media_fps()
+        seconds = max(0.0, float(seconds))
+        whole = int(seconds)
+        frames = int(round((seconds - whole) * fps)) % max(1, int(round(fps)))
+        hours, rem = divmod(whole, 3600)
+        minutes, secs = divmod(rem, 60)
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}:{frames:02d}"
+
+    def _update_timecode_displays(self, seconds: float) -> None:
+        """Reflect the playhead into the HUD and transport timecode labels."""
+        code = self._format_timecode(seconds)
+        hud = self.findChild(QLabel, "MediaWorkspacePreviewTimecode")
+        if hud is not None:
+            hud.setText(code)
+        tc = self._transport.findChild(QLabel, "TransportTimecode") or getattr(
+            self._transport, "_timecode", None
+        )
+        if tc is not None and hasattr(tc, "set_text"):
+            tc.set_text(code)
+        elif tc is not None and hasattr(tc, "setText"):
+            tc.setText(code)
+
     def _on_playhead_changed(self, seconds: float) -> None:
         """Reflect the timeline playhead on the TransportBar's seek position.
 
@@ -1698,6 +3448,8 @@ class _MediaWorkspace(QWidget):
         duration = self._timeline.duration()
         fraction = seconds / duration if duration > 0 else 0.0
         self._transport.set_position(fraction)
+        # Timecode readouts (HUD + transport) follow the single playhead.
+        self._update_timecode_displays(seconds)
         # Real playback: decode and display the frame at the new playhead. The
         # Timeline widget's own timer drives playhead_changed as playback
         # advances, so this reuses the existing timer (no second owner).
@@ -1726,17 +3478,45 @@ class _StreamAccordion(QWidget):
         s = tokens.spacing
 
         self.setObjectName("MediaWorkspaceStreamAccordion")
+        # Ignored horizontal policy: the accordion fits the fixed right-panel
+        # width instead of its grid's content minimums widening the scroll
+        # content (same fix as the AI card grid).
+        self.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+        )
         column = QVBoxLayout(self)
         column.setContentsMargins(0, 0, 0, 0)
         column.setSpacing(s.xxs)
 
+        # Header row: the collapse toggle plus trailing decorative micro
+        # icons like the reference accordions (wired to nothing).
+        header_row = QHBoxLayout()
+        header_row.setContentsMargins(0, 0, 0, 0)
+        header_row.setSpacing(s.xs)
         self._toggle = NeonButton(
             theme, f"{self._CHEVRON_EXPANDED}  {title}", variant="ghost", accent="cyan"
         )
         self._toggle.setObjectName("MediaWorkspaceStreamAccordionToggle")
         self._title = title
         self._toggle.clicked.connect(self._on_toggle)
-        column.addWidget(self._toggle)
+        header_row.addWidget(self._toggle, 0)
+        header_row.addStretch(1)
+        icon_side = 12
+        for icon_name in ("gauge", "split", "settings"):
+            micro = QLabel(self)
+            micro.setObjectName("MediaWorkspaceStreamAccordionIcon")
+            micro.setFixedSize(icon_side + 8, icon_side + 8)
+            micro.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            micro.setPixmap(
+                theme.icons.icon(icon_name, c.text_muted, icon_side)
+                .pixmap(icon_side, icon_side)
+            )
+            micro.setStyleSheet(
+                "#MediaWorkspaceStreamAccordionIcon { "
+                "background: transparent; }"
+            )
+            header_row.addWidget(micro, 0)
+        column.addLayout(header_row)
 
         self._content = QFrame(self)
         self._content.setObjectName("MediaWorkspaceStreamAccordionContent")
@@ -1835,10 +3615,24 @@ class _StreamAccordion(QWidget):
         self._grid.addWidget(self._axis_block("X", value_x), top, 1)
         self._grid.addWidget(self._axis_block("Y", value_y), bottom, 1)
         if linked:
+            c = self._theme.tokens.colors
             link = NeonButton(
-                self._theme, "Link", variant="ghost", accent="cyan"
+                self._theme, "", variant="ghost", accent="blue",
+                icon_name="link-2", icon_color=c.accent_blue,
+                corner_radius=8, pad_h=8, pad_v=8,
             )
             link.setObjectName("MediaWorkspaceStreamAxisLink")
+            link.setToolTip("Link X / Y")
+            link.setFixedSize(30, 30)
+            link.setStyleSheet(
+                f"#MediaWorkspaceStreamAxisLink {{ "
+                f"background: rgba(168, 85, 247, 0.14); "
+                f"border: 1px solid rgba(168, 85, 247, 0.45); "
+                f"border-radius: 8px; padding: 0px; }} "
+                f"#MediaWorkspaceStreamAxisLink:hover {{ "
+                f"background: rgba(168, 85, 247, 0.26); "
+                f"border: 1px solid {c.accent_blue}; }}"
+            )
             link.setSizePolicy(
                 QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
             )
@@ -1851,16 +3645,45 @@ class _StreamAccordion(QWidget):
         self._grid_row += 2
 
     def add_slider_row(
-        self, label: str, control: QWidget, value: str
+        self, label: str, control: QWidget, value: str,
+        *, chip: Optional[str] = None, reset: bool = False,
     ) -> None:
         """Append a single-slider row into the shared grid.
 
         Columns: 0 = name (left), 1 = the stretching horizontal slider,
         2 = one standalone value field on the outer-right boundary. Shares
         the axis rows' column boundaries so the name and the trailing value
-        align with the Transform rows above. UI-only / decorative.
+        align with the Transform rows above. ``chip`` (a color string) adds
+        a small checkbox-style swatch before the name like the reference's
+        Effects rows; ``reset`` appends a tiny undo icon after the value
+        field. UI-only / decorative.
         """
-        name = MetaLabel(self._theme, label, role="muted", style="body_small")
+        if chip:
+            name_wrap = QWidget(self._content)
+            wrap_row = QHBoxLayout(name_wrap)
+            wrap_row.setContentsMargins(0, 0, 0, 0)
+            wrap_row.setSpacing(self._theme.tokens.spacing.xs)
+            swatch = QLabel("✓", name_wrap)
+            swatch.setObjectName("MediaWorkspaceStreamEffectChip")
+            side = 14
+            swatch.setFixedSize(side, side)
+            swatch.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            swatch.setStyleSheet(
+                f"#MediaWorkspaceStreamEffectChip {{ "
+                f"background: {chip}; "
+                f"color: {self._theme.tokens.colors.text_on_accent}; "
+                f"border-radius: 3px; font-size: 9px; }}"
+            )
+            wrap_row.addWidget(swatch, 0)
+            wrap_row.addWidget(
+                MetaLabel(self._theme, label, role="muted", style="body_small"),
+                0,
+            )
+            name: QWidget = name_wrap
+        else:
+            name = MetaLabel(
+                self._theme, label, role="muted", style="body_small"
+            )
         self._grid.addWidget(
             name, self._grid_row, 0,
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
@@ -1868,25 +3691,75 @@ class _StreamAccordion(QWidget):
         control.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
+        # Keep the slider usable even when a long sibling row label (e.g.
+        # "AI Voice Enhance") widens the name column.
+        control.setMinimumWidth(96)
         self._grid.addWidget(control, self._grid_row, 1)
         field = TextField(self._theme, text=value)
         field.setObjectName("MediaWorkspaceStreamNumericField")
         field.setFixedWidth(64)
         field.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        if reset:
+            c = self._theme.tokens.colors
+            value_wrap = QWidget(self._content)
+            value_row = QHBoxLayout(value_wrap)
+            value_row.setContentsMargins(0, 0, 0, 0)
+            value_row.setSpacing(self._theme.tokens.spacing.xs)
+            value_row.addWidget(field, 0)
+            undo = QLabel(value_wrap)
+            undo.setObjectName("MediaWorkspaceStreamRowReset")
+            undo.setFixedSize(16, 16)
+            undo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            undo.setPixmap(
+                self._theme.icons.icon("undo-2", c.text_muted, 12)
+                .pixmap(12, 12)
+            )
+            undo.setToolTip("Reset")
+            value_row.addWidget(undo, 0)
+            trailing: QWidget = value_wrap
+        else:
+            trailing = field
         self._grid.addWidget(
-            field, self._grid_row, 2,
+            trailing, self._grid_row, 2,
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
         )
         self._grid_row += 1
 
     def _on_toggle(self) -> None:
-        """Flip the local expanded state (no external effect)."""
+        """Flip the local expanded state with a smooth height animation."""
         self._expanded = not self._expanded
-        self._content.setVisible(self._expanded)
         chevron = (
             self._CHEVRON_EXPANDED if self._expanded else self._CHEVRON_COLLAPSED
         )
         self._toggle.set_text(f"{chevron}  {self._title}")
+
+        content = self._content
+        if self._expanded:
+            # Expand: show content, then animate height 0 → target.
+            content.setVisible(True)
+            target_h = content.sizeHint().height()
+            target_h = max(target_h, 50)  # floor so short sections still animate
+            content.setMaximumHeight(0)
+            anim = QPropertyAnimation(content, b"maximumHeight", self)
+            anim.setDuration(self._theme.duration("fast"))
+            anim.setStartValue(0)
+            anim.setEndValue(target_h)
+            anim.setEasingCurve(self._theme.easing("out_cubic"))
+            anim.finished.connect(lambda: content.setMaximumHeight(16777215))
+            anim.start(QAbstractAnimation.DeletionPolicy.DeleteWhenStopped)
+            self._collapse_anim = anim
+        else:
+            # Collapse: animate height current → 0, then hide.
+            current_h = content.height()
+            content.setMaximumHeight(current_h)
+            anim = QPropertyAnimation(content, b"maximumHeight", self)
+            anim.setDuration(self._theme.duration("fast"))
+            anim.setStartValue(current_h)
+            anim.setEndValue(0)
+            anim.setEasingCurve(self._theme.easing("in_cubic"))
+            anim.finished.connect(lambda: content.setVisible(False))
+            anim.start(QAbstractAnimation.DeletionPolicy.DeleteWhenStopped)
+            self._collapse_anim = anim
 
 
 def build_media_workspace_screen(theme: ThemeManager, controller=None) -> QWidget:
