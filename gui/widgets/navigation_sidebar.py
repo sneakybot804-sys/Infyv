@@ -1,14 +1,15 @@
-"""NavigationSidebar: the premium left navigation rail (Milestone 2).
+"""NavigationSidebar: the premium left navigation region (NEXUS layout).
 
 An additive, UI-only application navigation sidebar composed for the media
-workspace's left column. It renders, top to bottom:
+workspace's left column. It renders TWO visual columns, matching the NEXUS
+EDIT PRO reference:
 
-* a top navigation stack (Dashboard, Projects, Media, ... Settings) with an
-  active item that carries a left cyan accent border and a cyan gradient glow;
-* a Recent Projects list (rounded thumbnail + elided name + muted timestamp);
-* a System Overview block (CPU / GPU / Memory) with stacked ultra-thin neon
-  progress bars; and
-* a compact AI Status card ("Neural Vision v3.2" / "Active").
+* a narrow nav rail (Dashboard, Projects, Media, ... Settings) with an
+  active item that carries a rounded violet fill, plus a user chip pinned to
+  the rail's bottom; and
+* a projects panel with a "Recent Projects" list (gradient thumbnail +
+  name + timestamp, active row highlighted), a "+ New Project" action, and
+  a SYSTEM block (GPU / RAM meters + AI ENGINE / RENDER ENGINE readouts).
 
 Everything is decorative and token-derived. Selecting a nav item is UI-only
 state: the sidebar tracks the current index and emits
@@ -17,19 +18,19 @@ state: the sidebar tracks the current index and emits
 Stable object names for later integration and tests:
 
 * ``NavigationSidebar``       -- the root widget
-* ``NavigationSidebarNav``    -- the top nav container
+* ``NavigationSidebarNav``    -- the nav rail container
 * ``NavigationItem``          -- each nav row button
 * ``NavigationSidebarRecent`` -- the Recent Projects container
 * ``NavigationRecentItem``    -- each recent-project row
-* ``NavigationSidebarSystem`` -- the System Overview container
+* ``NavigationSidebarSystem`` -- the System block container
 * ``NavigationSystemBar``     -- each ultra-thin metric bar
-* ``NavigationSidebarAiStatus`` -- the bottom AI status card
+* ``NavigationSidebarAiStatus`` -- the AI engine status readout
 """
 from __future__ import annotations
 
 from typing import List, Optional, Sequence, Tuple
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QEasingCurve, QParallelAnimationGroup, QPropertyAnimation, QVariantAnimation, Qt, Signal
 from PySide6.QtGui import QPainter
 from PySide6.QtWidgets import (
     QFrame,
@@ -43,44 +44,72 @@ from PySide6.QtWidgets import (
 from gui.theme.manager import ThemeManager
 from gui.widgets.base import ThemedWidget
 from gui.widgets.meta_label import MetaLabel
-from gui.widgets.section_header import SectionHeader
 
-#: Top navigation items, in the exact blueprint order.
+#: Nav rail items, in the exact reference order.
 _NAV_ITEMS: Tuple[str, ...] = (
     "Dashboard",
     "Projects",
     "Media",
     "Assets",
-    "AI Tools",
-    "Templates",
+    "Timeline",
     "Effects",
+    "Transitions",
     "Audio",
+    "Captions",
+    "Templates",
+    "AI Studio",
     "Export",
     "Settings",
 )
 
-#: Decorative Recent Projects seed data: (name, timestamp).
-_RECENT_PROJECTS: Tuple[Tuple[str, str], ...] = (
-    ("Launch Trailer Cut", "Just now"),
-    ("Boss Fight Highlights", "2 hours ago"),
-    ("Season 3 Montage", "Yesterday"),
-    ("Tournament Recap", "3 days ago"),
+#: Lucide icon name for each nav item (index-aligned with _NAV_ITEMS).
+_NAV_ICONS: Tuple[str, ...] = (
+    "layout-dashboard",
+    "folder",
+    "image",
+    "package",
+    "clapperboard",
+    "zap",
+    "repeat",
+    "audio-lines",
+    "type",
+    "layout-template",
+    "bot",
+    "upload",
+    "settings",
 )
 
-#: Decorative System Overview metrics: (label, sub-label, percent, accent).
+#: Decorative Recent Projects seed data: (name, timestamp, thumb-gradient).
+_RECENT_PROJECTS: Tuple[Tuple[str, str, str], ...] = (
+    ("Valorant Montage", "Today, 2:35 PM", "magenta"),
+    ("Radiant Moments", "Yesterday, 11:20 PM", "violet"),
+    ("Clutch Compilation", "May 14, 2025", "blue"),
+    ("Funny & Fails", "May 12, 2025", "pink"),
+    ("Edit Practice", "May 10, 2025", "violet"),
+)
+
+#: Decorative SYSTEM metrics: (label, sub-label, percent, accent).
 _SYSTEM_METRICS: Tuple[Tuple[str, str, int, str], ...] = (
-    ("CPU", "12-Core | 4.2 GHz", 54, "cyan"),
-    ("GPU", "NVIDIA RTX 4070 Ti", 68, "green"),
-    ("Memory", "32 GB | 18.4 GB used", 57, "cyan"),
+    ("GPU", "NVIDIA RTX 4070 Ti", 78, "green"),
+    ("RAM", "22.4 / 32 GB", 70, "violet"),
+    ("CPU", "12-Core | 4.2 GHz", 41, "violet"),
+)
+
+#: Decorative engine readouts: (label, sub-label).
+_SYSTEM_ENGINES: Tuple[Tuple[str, str], ...] = (
+    ("AI ENGINE", "INFY AI v3.2.1"),
+    ("RENDER ENGINE", "CUDA / OPTIX"),
 )
 
 
 class _ThinBar(QFrame):
     """An ultra-thin (3px) decorative meter with a neon fill on a dark track.
 
-    Fill width is expressed via layout stretch so it tracks the widget width
-    without any painting. Colors and radius are injected (token-derived by the
-    caller); this frame stores none of its own theme state.
+    Fill width is expressed via a QPropertyAnimation on the fill widget's
+    maximumWidth so it animates from 0 → target on construction, and can be
+    updated live via :meth:`set_percent`. Colors and radius are injected
+    (token-derived by the caller); this frame stores none of its own theme
+    state.
     """
 
     def __init__(
@@ -90,12 +119,14 @@ class _ThinBar(QFrame):
         track_color: str,
         radius: int,
         percent: int,
+        animated: bool = True,
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
         self.setObjectName("NavigationSystemBar")
         self.setFixedHeight(3)
-        pct = max(0, min(100, int(percent)))
+        self._percent = max(0, min(100, int(percent)))
+        self._animated = animated
 
         row = QHBoxLayout(self)
         row.setContentsMargins(0, 0, 0, 0)
@@ -103,9 +134,10 @@ class _ThinBar(QFrame):
 
         self._fill = QFrame(self)
         self._fill.setObjectName("NavigationSystemBarFill")
-        row.addWidget(self._fill, pct)
-        # Remainder of the track (kept transparent) fills the rest.
-        row.addStretch(max(1, 100 - pct))
+        # Start at zero width; animation will expand to the target percent.
+        self._fill.setMaximumWidth(0)
+        row.addWidget(self._fill, self._percent)
+        row.addStretch(max(1, 100 - self._percent))
 
         self.setStyleSheet(
             f"#NavigationSystemBar {{ background: {track_color}; "
@@ -114,13 +146,45 @@ class _ThinBar(QFrame):
             f"border-radius: {radius}px; }}"
         )
 
+        # Persistent animation driven by showEvent so the bar fills after
+        # the sidebar is laid out and has a real pixel width.
+        self._fill_anim = QPropertyAnimation(self._fill, b"maximumWidth", self)
+        self._fill_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        """Animate the fill from 0 → target width on first show."""
+        super().showEvent(event)
+        if not self._animated:
+            self._fill.setMaximumWidth(16777215)
+            return
+        if getattr(self, "_bar_shown", False):
+            return
+        self._bar_shown = True
+        # Delay one frame so the widget has a real width after layout.
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(60, self._run_fill_anim)
+
+    def _run_fill_anim(self) -> None:
+        total = self.width()
+        if total <= 0:
+            self._fill.setMaximumWidth(16777215)
+            return
+        target = int(total * self._percent / 100)
+        self._fill_anim.stop()
+        self._fill_anim.setDuration(700)
+        self._fill_anim.setStartValue(0)
+        self._fill_anim.setEndValue(target)
+        self._fill_anim.start()
+        # After animation finishes, unlock the maximum so resize works.
+        self._fill_anim.finished.connect(lambda: self._fill.setMaximumWidth(16777215))
+
 
 class NavigationSidebar(ThemedWidget):
-    """The premium left navigation rail (UI-only, additive).
+    """The premium left navigation region (UI-only, additive).
 
     Args:
         theme: Injected theme manager (sole source of visual values).
-        current: Initially active nav index. Default ``0`` (Dashboard).
+        current: Initially active nav index. Default ``1`` (Projects).
         parent: Optional Qt parent.
 
     Signals:
@@ -130,11 +194,18 @@ class NavigationSidebar(ThemedWidget):
 
     navigation_changed = Signal(int)
 
+    #: Total fixed width of the two-column region (rail + projects panel).
+    #: Sized so the longest strings ("Clutch Compilation", "INFY USER",
+    #: "RENDER ENGINE") render fully without eliding.
+    TOTAL_WIDTH = 376
+    #: Width of the icon+label nav rail column.
+    RAIL_WIDTH = 168
+
     def __init__(
         self,
         theme: ThemeManager,
         *,
-        current: int = 0,
+        current: int = 1,
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(theme, parent)
@@ -143,27 +214,21 @@ class NavigationSidebar(ThemedWidget):
         self._current = current
         self._nav_buttons: List[QWidget] = []
 
-        # Lock the rail to exactly 240px (DPI-scaled).
-        self.setFixedWidth(self.scaled(240))
+        # Lock the region to the reference's two-column width (DPI-scaled).
+        self.setFixedWidth(self.scaled(self.TOTAL_WIDTH))
 
         # WA_StyledBackground: required so Qt honours background-color in QSS
         # for plain QWidget subclasses. Without it the panel never paints.
         self.setAttribute(Qt.WA_StyledBackground, True)
 
         tokens = self.tokens
-        root = QVBoxLayout(self)
-        m = self.scaled(tokens.spacing.lg)  # 16px on all four sides
-        root.setContentsMargins(m, m, m, m)
-        root.setSpacing(self.scaled(tokens.spacing.xl))  # 24px between blocks
+        root = QHBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        # All sections use stretch=0 (natural height). The single addStretch(1)
-        # between Recent Projects and System Overview absorbs all spare vertical
-        # space, pinning the footer to the bottom without compressing the nav.
-        root.addWidget(self._build_nav(), 0)
-        root.addWidget(self._build_recent(), 0)
-        root.addStretch(1)
-        root.addWidget(self._build_system(), 0)
-        root.addWidget(self._build_ai_status(), 0)
+        root.addWidget(self._build_rail(), 0)
+        root.addWidget(self._build_projects_panel(), 1)
+        _ = tokens
 
         # apply_theme sets the panel background and calls _update_nav_styles.
         # The showEvent override below re-applies nav styles after Qt's first
@@ -203,103 +268,307 @@ class NavigationSidebar(ThemedWidget):
     # ------------------------------------------------------------------ #
     # Region builders
     # ------------------------------------------------------------------ #
-    def _build_nav(self) -> QWidget:
-        """Build the top navigation stack with 8px vertical gaps."""
+    def _build_rail(self) -> QWidget:
+        """Build the left nav rail: icon+label stack + bottom user chip."""
         tokens = self.tokens
-        nav = QWidget(self)
+        rail = QWidget(self)
+        rail.setObjectName("NavigationSidebarRail")
+        rail.setAttribute(Qt.WA_StyledBackground, True)
+        rail.setFixedWidth(self.scaled(self.RAIL_WIDTH))
+        col = QVBoxLayout(rail)
+        m = self.scaled(tokens.spacing.sm)
+        col.setContentsMargins(m, self.scaled(tokens.spacing.md), m, m)
+        col.setSpacing(self.scaled(tokens.spacing.md))
+
+        nav = QWidget(rail)
         nav.setObjectName("NavigationSidebarNav")
         layout = QVBoxLayout(nav)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(self.scaled(tokens.spacing.sm))  # 8px gap
+        layout.setSpacing(self.scaled(tokens.spacing.xs))  # tight 4px gap
 
-        row_h = self.scaled(38)  # explicit row height: taller click target
-        # and more visible background fill; geometry owned by Qt layout,
-        # not by QSS padding which cannot expand a QLabel.
+        row_h = self.scaled(34)
+        icon_side = self.scaled(16)
+        pad_h = self.scaled(tokens.spacing.sm + 2)  # 10px inner padding
         for index, label in enumerate(_NAV_ITEMS):
-            item = QLabel(label, nav)
+            item = QWidget(nav)
             item.setObjectName("NavigationItem")
-            item.setFont(self._theme.font("body"))
+            item.setAttribute(Qt.WA_StyledBackground, True)
             item.setFixedHeight(row_h)
             item.setCursor(Qt.CursorShape.PointingHandCursor)
+            row = QHBoxLayout(item)
+            row.setContentsMargins(pad_h, 0, pad_h, 0)
+            row.setSpacing(self.scaled(tokens.spacing.sm + 2))  # 10px
+
+            icon = QLabel(item)
+            icon.setObjectName("NavigationItemIcon")
+            icon.setFixedSize(icon_side, icon_side)
+            icon.setScaledContents(True)
+            row.addWidget(icon, 0, Qt.AlignmentFlag.AlignVCenter)
+
+            text = QLabel(label, item)
+            text.setObjectName("NavigationItemText")
+            text.setFont(self._theme.font("body_small"))
+            row.addWidget(text, 1, Qt.AlignmentFlag.AlignVCenter)
+
             # UI-only click handling via a lambda-bound mouse release.
             item.mouseReleaseEvent = (  # type: ignore[assignment]
                 lambda _event, i=index: self.select(i)
             )
             layout.addWidget(item)
             self._nav_buttons.append(item)
-        return nav
 
-    def _build_recent(self) -> QWidget:
-        """Build the Recent Projects list (24px below nav, 8px row gap)."""
+        col.addWidget(nav, 0)
+        col.addStretch(1)
+        col.addWidget(self._build_user_chip(rail), 0)
+        return rail
+
+    def _build_user_chip(self, parent: QWidget) -> QWidget:
+        """Build the bottom-of-rail user chip (avatar + name + plan)."""
         tokens = self.tokens
-        wrap = QWidget(self)
+        c = tokens.colors
+        chip = QFrame(parent)
+        chip.setObjectName("NavigationUserChip")
+        row = QHBoxLayout(chip)
+        pad = self.scaled(tokens.spacing.sm)
+        row.setContentsMargins(pad, pad, pad, pad)
+        row.setSpacing(self.scaled(tokens.spacing.sm))
+
+        avatar = QLabel("I", chip)
+        avatar.setObjectName("NavigationUserAvatar")
+        side = self.scaled(26)
+        avatar.setFixedSize(side, side)
+        avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        avatar.setStyleSheet(
+            f"#NavigationUserAvatar {{ color: {c.text_primary}; "
+            f"font-size: 12px; font-weight: 800; "
+            f"border-radius: {side // 2}px; "
+            f"background: qlineargradient(x1:0, y1:0, x2:1, y2:1, "
+            f"stop:0 {c.accent_blue}, stop:1 {c.accent_purple}); }}"
+        )
+        row.addWidget(avatar, 0)
+
+        text_col = QVBoxLayout()
+        text_col.setContentsMargins(0, 0, 0, 0)
+        text_col.setSpacing(0)
+        name = QLabel("INFY USER", chip)
+        name.setObjectName("NavigationUserName")
+        name.setFont(self._theme.font("caption"))
+        name.setMinimumWidth(self.scaled(80))
+        name.setStyleSheet(
+            f"#NavigationUserName {{ color: {c.text_primary}; "
+            f"background: transparent; font-weight: 700; }}"
+        )
+        plan = QLabel("Pro Plan", chip)
+        plan.setObjectName("NavigationUserPlan")
+        plan.setFont(self._theme.font("caption"))
+        plan.setMinimumWidth(self.scaled(60))
+        plan.setStyleSheet(
+            f"#NavigationUserPlan {{ color: {c.text_muted}; "
+            f"background: transparent; }}"
+        )
+        text_col.addWidget(name)
+        text_col.addWidget(plan)
+        row.addLayout(text_col, 1)
+
+        gear = QLabel(chip)
+        gear.setObjectName("NavigationUserSettings")
+        gside = self.scaled(14)
+        gear.setFixedSize(gside, gside)
+        gear.setScaledContents(True)
+        try:
+            gear.setPixmap(
+                self.icon("settings", c.text_muted, gside).pixmap(gside, gside)
+            )
+        except Exception:  # pragma: no cover - icon optional
+            pass
+        row.addWidget(gear, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        chip.setStyleSheet(
+            f"#NavigationUserChip {{ background: {c.surface_elevated}; "
+            f"border: 1px solid {c.glass_border}; "
+            f"border-radius: {self.scaled(tokens.radius.md)}px; }}"
+        )
+        return chip
+
+    def _build_projects_panel(self) -> QWidget:
+        """Build the second column: Recent Projects + SYSTEM block."""
+        tokens = self.tokens
+        panel = QWidget(self)
+        panel.setObjectName("NavigationSidebarPanel")
+        panel.setAttribute(Qt.WA_StyledBackground, True)
+        col = QVBoxLayout(panel)
+        m = self.scaled(tokens.spacing.md)
+        col.setContentsMargins(m, self.scaled(tokens.spacing.md), m, m)
+        col.setSpacing(self.scaled(tokens.spacing.md))
+
+        col.addWidget(self._build_recent(panel), 0)
+        col.addStretch(1)
+        col.addWidget(self._build_system(panel), 0)
+        return panel
+
+    def _build_recent(self, parent: QWidget) -> QWidget:
+        """Build the Recent Projects list with the caption header row."""
+        tokens = self.tokens
+        c = tokens.colors
+        wrap = QWidget(parent)
         wrap.setObjectName("NavigationSidebarRecent")
         layout = QVBoxLayout(wrap)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(self.scaled(tokens.spacing.sm))  # 8px
 
-        header = SectionHeader(self._theme, "Recent Projects")
-        layout.addWidget(header)
+        # Caption header: "RECENT PROJECTS" + trailing "+".
+        head = QHBoxLayout()
+        head.setContentsMargins(0, 0, 0, 0)
+        title = QLabel("RECENT PROJECTS", wrap)
+        title.setObjectName("NavigationRecentTitle")
+        title.setFont(self._theme.font("caption"))
+        title.setMinimumWidth(self.scaled(120))
+        title.setStyleSheet(
+            f"#NavigationRecentTitle {{ color: {c.text_muted}; "
+            f"background: transparent; font-weight: 700; "
+            f"letter-spacing: 1px; }}"
+        )
+        plus = QLabel("+", wrap)
+        plus.setObjectName("NavigationRecentPlus")
+        plus.setStyleSheet(
+            f"#NavigationRecentPlus {{ color: {c.text_muted}; "
+            f"background: transparent; font-size: 14px; }}"
+        )
+        head.addWidget(title, 1)
+        head.addWidget(plus, 0)
+        layout.addLayout(head)
 
-        rows = QWidget(wrap)
-        rows.setObjectName("NavigationRecentRows")
-        rows_layout = QVBoxLayout(rows)
-        rows_layout.setContentsMargins(0, 0, 0, 0)
-        rows_layout.setSpacing(self.scaled(tokens.spacing.sm))  # explicit 8px
+        # "+ New Project" ghost action.
+        new_project = QLabel("+  New Project", wrap)
+        new_project.setObjectName("NavigationRecentNewProject")
+        new_project.setFont(self._theme.font("body_small"))
+        new_project.setFixedHeight(self.scaled(30))
+        new_project.setCursor(Qt.CursorShape.PointingHandCursor)
+        new_project.setStyleSheet(
+            f"#NavigationRecentNewProject {{ color: {c.text_secondary}; "
+            f"background: transparent; padding-left: {self.scaled(6)}px; "
+            f"border: 1px dashed {c.glass_border}; "
+            f"border-radius: {self.scaled(tokens.radius.sm)}px; }} "
+            f"#NavigationRecentNewProject:hover {{ "
+            f"color: {c.text_primary}; border-color: {c.accent_blue}; }}"
+        )
+        layout.addWidget(new_project)
 
-        for name, when in _RECENT_PROJECTS:
-            rows_layout.addWidget(self._recent_row(name, when))
-        # No addStretch here: the root layout's expanding spacer (inserted
-        # after this block) provides all the vertical breathing room.
-        layout.addWidget(rows)
+        for index, (name, when, grad) in enumerate(_RECENT_PROJECTS):
+            layout.addWidget(
+                self._recent_row(name, when, grad, active=(index == 0))
+            )
         return wrap
 
-    def _recent_row(self, name: str, when: str) -> QWidget:
-        """Build a single recent-project row: thumb + elided name + time."""
+    def _recent_row(
+        self, name: str, when: str, grad: str, *, active: bool = False
+    ) -> QWidget:
+        """Build a recent-project row: gradient thumb + name over timestamp."""
         tokens = self.tokens
+        c = tokens.colors
         row = QWidget(self)
         row.setObjectName("NavigationRecentItem")
+        row.setAttribute(Qt.WA_StyledBackground, True)
+        row.setCursor(Qt.CursorShape.PointingHandCursor)
         layout = QHBoxLayout(row)
-        layout.setContentsMargins(0, 0, 0, 0)
+        pad = self.scaled(tokens.spacing.xs + 2)
+        layout.setContentsMargins(pad, pad, pad, pad)
         layout.setSpacing(self.scaled(tokens.spacing.sm))
 
+        grads = {
+            "magenta": (c.accent_purple, "#511543"),
+            "violet": (c.accent_blue, "#2A1650"),
+            "blue": ("#6366f1", "#1E1B4B"),
+            "pink": (c.accent_pink, "#500F2E"),
+        }
+        g0, g1 = grads.get(grad, grads["violet"])
         thumb = QFrame(row)
         thumb.setObjectName("NavigationRecentThumb")
-        side = self.scaled(24)
-        thumb.setFixedSize(side, side)
+        thumb.setFixedSize(self.scaled(40), self.scaled(28))
+        thumb.setStyleSheet(
+            f"#NavigationRecentThumb {{ "
+            f"background: qlineargradient(x1:0, y1:0, x2:1, y2:1, "
+            f"stop:0 {g0}, stop:1 {g1}); "
+            f"border: 1px solid {c.glass_border}; "
+            f"border-radius: {self.scaled(tokens.radius.sm)}px; }}"
+        )
         layout.addWidget(thumb, 0)
 
+        text_col = QVBoxLayout()
+        text_col.setContentsMargins(0, 0, 0, 0)
+        text_col.setSpacing(0)
         name_label = QLabel(name, row)
         name_label.setObjectName("NavigationRecentName")
         name_label.setFont(self._theme.font("body_small"))
-        name_label.setMinimumWidth(0)
-        layout.addWidget(name_label, 1)
-
+        name_label.setMinimumWidth(self.scaled(80))
+        text_col.addWidget(name_label)
         time_label = MetaLabel(
             self._theme, when, role="muted", style="caption"
         )
         time_label.setObjectName("NavigationRecentTime")
-        layout.addWidget(time_label, 0)
+        text_col.addWidget(time_label)
+        layout.addLayout(text_col, 1)
+
+        radius = self.scaled(tokens.radius.sm)
+        if active:
+            row.setStyleSheet(
+                f"#NavigationRecentItem {{ "
+                f"background: rgba(168, 85, 247, 0.14); "
+                f"border: 1px solid rgba(168, 85, 247, 0.55); "
+                f"border-radius: {radius}px; }} "
+                f"#NavigationRecentName {{ color: {c.text_primary}; "
+                f"background: transparent; font-weight: 600; }}"
+            )
+        else:
+            row.setStyleSheet(
+                f"#NavigationRecentItem {{ background: transparent; "
+                f"border: 1px solid transparent; "
+                f"border-radius: {radius}px; }} "
+                f"#NavigationRecentItem:hover {{ "
+                f"background: rgba(255, 255, 255, 0.05); }} "
+                f"#NavigationRecentName {{ color: {c.text_secondary}; "
+                f"background: transparent; }}"
+            )
         return row
 
-    def _build_system(self) -> QWidget:
-        """Build the System Overview block (stacked labels over thin bars)."""
+    def _build_system(self, parent: QWidget) -> QWidget:
+        """Build the SYSTEM block: meters + engine readouts."""
         tokens = self.tokens
         c = tokens.colors
-        wrap = QWidget(self)
+        wrap = QWidget(parent)
         wrap.setObjectName("NavigationSidebarSystem")
         layout = QVBoxLayout(wrap)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(self.scaled(tokens.spacing.sm))  # explicit 8px row gap
+        layout.setSpacing(self.scaled(tokens.spacing.sm))  # explicit 8px gap
 
-        header = SectionHeader(self._theme, "System Overview")
-        layout.addWidget(header)
+        title = QLabel("SYSTEM", wrap)
+        title.setObjectName("NavigationSystemTitle")
+        title.setFont(self._theme.font("caption"))
+        title.setStyleSheet(
+            f"#NavigationSystemTitle {{ color: {c.text_muted}; "
+            f"background: transparent; font-weight: 700; "
+            f"letter-spacing: 1px; }}"
+        )
+        layout.addWidget(title)
 
-        accent_map = {"cyan": c.accent_cyan, "green": c.success}
+        accent_map = {
+            "violet": (
+                f"qlineargradient(x1:0, y1:0, x2:1, y2:0, "
+                f"stop:0 {c.accent_blue}, stop:1 {c.accent_purple})"
+            ),
+            "green": (
+                f"qlineargradient(x1:0, y1:0, x2:1, y2:0, "
+                f"stop:0 {c.success}, stop:1 {c.accent_cyan})"
+            ),
+        }
         for label, sub, percent, accent in _SYSTEM_METRICS:
             layout.addWidget(
                 self._system_row(label, sub, percent, accent_map[accent])
             )
+
+        # Engine readouts: label + sub-label + trailing "Active" badge.
+        for label, sub in _SYSTEM_ENGINES:
+            layout.addWidget(self._engine_row(wrap, label, sub))
         return wrap
 
     def _system_row(
@@ -323,6 +592,7 @@ class NavigationSidebar(ThemedWidget):
         pct = QLabel(f"{percent}%", row)
         pct.setObjectName("NavigationSystemPercent")
         pct.setFont(self._theme.font("caption"))
+        pct.setMinimumWidth(self.scaled(34))
         pct.setAlignment(
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
         )
@@ -333,6 +603,7 @@ class NavigationSidebar(ThemedWidget):
         # Sub-label: tiny, low-opacity hardware descriptor.
         sub_label = MetaLabel(self._theme, sub, role="disabled", style="caption")
         sub_label.setObjectName("NavigationSystemSubLabel")
+        sub_label.setMinimumHeight(self.scaled(20))
         col.addWidget(sub_label)
 
         # Line 2: ultra-thin neon meter underneath the text.
@@ -357,54 +628,50 @@ class NavigationSidebar(ThemedWidget):
         )
         return row
 
-    def _build_ai_status(self) -> QWidget:
-        """Build the compact AI status card at the very bottom."""
+    def _engine_row(self, parent: QWidget, label: str, sub: str) -> QWidget:
+        """Build one engine readout row: label over sub + trailing badge."""
         tokens = self.tokens
         c = tokens.colors
-        card = QFrame(self)
-        card.setObjectName("NavigationSidebarAiStatus")
-        card.setFrameShape(QFrame.Shape.StyledPanel)
-        layout = QHBoxLayout(card)
-        pad = self.scaled(tokens.spacing.sm)
-        layout.setContentsMargins(pad, pad, pad, pad)
-        layout.setSpacing(self.scaled(tokens.spacing.sm))
+        row = QWidget(parent)
+        row.setObjectName("NavigationSidebarAiStatus")
+        line = QHBoxLayout(row)
+        line.setContentsMargins(0, self.scaled(tokens.spacing.xxs), 0, 0)
+        line.setSpacing(self.scaled(tokens.spacing.sm))
 
         text_col = QVBoxLayout()
         text_col.setContentsMargins(0, 0, 0, 0)
-        text_col.setSpacing(self.scaled(tokens.spacing.xxs))
-        model = QLabel("Neural Vision v3.2", card)
+        text_col.setSpacing(0)
+        title = QLabel(label, row)
+        title.setObjectName("NavigationAiTitle")
+        title.setFont(self._theme.font("caption"))
+        title.setMinimumWidth(self.scaled(96))
+        title.setStyleSheet(
+            f"#NavigationAiTitle {{ color: {c.text_secondary}; "
+            f"background: transparent; font-weight: 700; "
+            f"letter-spacing: 1px; }}"
+        )
+        model = QLabel(sub, row)
         model.setObjectName("NavigationAiModel")
-        model.setFont(self._theme.font("body_small"))
+        model.setFont(self._theme.font("caption"))
+        model.setMinimumWidth(self.scaled(96))
         model.setStyleSheet(
-            f"#NavigationAiModel {{ color: {c.text_primary}; "
+            f"#NavigationAiModel {{ color: {c.text_muted}; "
             f"background: transparent; }}"
         )
-        status = QLabel("Active", card)
-        status.setObjectName("NavigationAiState")
-        status.setFont(self._theme.font("caption"))
-        status.setStyleSheet(
-            f"#NavigationAiState {{ color: {c.success}; "
-            f"background: transparent; }}"
-        )
+        text_col.addWidget(title)
         text_col.addWidget(model)
-        text_col.addWidget(status)
-        layout.addLayout(text_col, 1)
+        line.addLayout(text_col, 1)
 
-        dot = QFrame(card)
-        dot.setObjectName("NavigationAiDot")
-        dot.setFixedSize(self.scaled(8), self.scaled(8))
-        dot.setStyleSheet(
-            f"#NavigationAiDot {{ background: {c.success}; "
-            f"border-radius: {self.scaled(4)}px; }}"
+        state = QLabel("Active", row)
+        state.setObjectName("NavigationAiState")
+        state.setFont(self._theme.font("caption"))
+        state.setMinimumWidth(self.scaled(46))
+        state.setStyleSheet(
+            f"#NavigationAiState {{ color: {c.success}; "
+            f"background: transparent; font-weight: 600; }}"
         )
-        layout.addWidget(dot, 0, Qt.AlignmentFlag.AlignVCenter)
-
-        card.setStyleSheet(
-            f"#NavigationSidebarAiStatus {{ background: {c.surface_overlay}; "
-            f"border: 1px solid {c.glass_border}; "
-            f"border-radius: {self.scaled(tokens.radius.md)}px; }}"
-        )
-        return card
+        line.addWidget(state, 0, Qt.AlignmentFlag.AlignVCenter)
+        return row
 
     # ------------------------------------------------------------------ #
     # Public API (UI-only state)
@@ -419,9 +686,89 @@ class NavigationSidebar(ThemedWidget):
             raise ValueError(f"navigation index out of range: {index}")
         if index == self._current:
             return
+        old = self._current
         self._current = index
-        self._update_nav_styles()
+        self._animate_nav_selection(old, index)
         self.navigation_changed.emit(self._current)
+
+    def _animate_nav_selection(self, old_index: int, new_index: int) -> None:
+        """Smoothly cross-fade the active highlight between nav items.
+
+        Uses a QParallelAnimationGroup to simultaneously fade the old item's
+        background alpha out and the new item's background alpha in.
+        """
+        c = self.tokens.colors
+        radius = self.scaled(self.tokens.radius.sm)
+        side = self.scaled(16)
+        dur = self._theme.duration("fast")
+        easing = self._theme.easing("out_cubic")
+
+        group = QParallelAnimationGroup(self)
+
+        def _make_style(text_color: str, bg_alpha: str, border_alpha: str, is_active: bool) -> str:
+            weight = "600" if is_active else ""
+            border = f"1px solid rgba(168, 85, 247, {border_alpha});" if is_active else "1px solid transparent;"
+            bg = f"rgba(168, 85, 247, {bg_alpha});" if is_active else "rgba(0,0,0,0);"
+            if not is_active:
+                hover_bg = "rgba(255, 255, 255, 0.05);"
+                return (
+                    f"#NavigationItem {{ border: 1px solid transparent; "
+                    f"border-radius: {radius}px; background: transparent; }} "
+                    f"#NavigationItem:hover {{ background: {hover_bg}; }} "
+                    f"#NavigationItemText {{ color: {c.text_secondary}; "
+                    f"background: transparent; {('font-weight: ' + weight + ';') if weight else ''}}} "
+                    f"#NavigationItemIcon {{ background: transparent; }}"
+                )
+            return (
+                f"#NavigationItem {{ border: {border} "
+                f"border-radius: {radius}px; background: {bg} }} "
+                f"#NavigationItemText {{ color: {text_color}; "
+                f"background: transparent; font-weight: {weight}; }} "
+                f"#NavigationItemIcon {{ background: transparent; }}"
+            )
+
+        # New item: animate background in
+        new_item = self._nav_buttons[new_index]
+        new_icon = new_item.findChild(QLabel, "NavigationItemIcon")
+
+        def _on_new_alpha(v, item=new_item, ic=new_icon, ni=new_index):
+            a = max(0.0, min(1.0, float(v)))
+            bg = f"{a * 0.18:.3f}"
+            border = f"{a * 0.55:.3f}"
+            item.setStyleSheet(_make_style(c.text_primary, bg, border, True))
+            ic_color = c.text_primary if a > 0.5 else c.text_muted
+            if ic is not None:
+                ic.setPixmap(self.icon(_NAV_ICONS[ni], ic_color, side).pixmap(side, side))
+
+        anim_new = QVariantAnimation(self)
+        anim_new.setDuration(dur)
+        anim_new.setStartValue(0.0)
+        anim_new.setEndValue(1.0)
+        anim_new.setEasingCurve(easing)
+        anim_new.valueChanged.connect(_on_new_alpha)
+        group.addAnimation(anim_new)
+
+        # Old item: animate background out
+        if 0 <= old_index < len(self._nav_buttons):
+            old_item = self._nav_buttons[old_index]
+            old_icon = old_item.findChild(QLabel, "NavigationItemIcon")
+
+            def _on_old_alpha(v, item=old_item, ic=old_icon, oi=old_index):
+                a = max(0.0, min(1.0, float(v)))
+                item.setStyleSheet(_make_style(c.text_secondary, "0", "0", False))
+                if ic is not None:
+                    ic.setPixmap(self.icon(_NAV_ICONS[oi], c.text_muted, side).pixmap(side, side))
+
+            anim_old = QVariantAnimation(self)
+            anim_old.setDuration(dur)
+            anim_old.setStartValue(1.0)
+            anim_old.setEndValue(0.0)
+            anim_old.setEasingCurve(self._theme.easing("in_cubic"))
+            anim_old.valueChanged.connect(_on_old_alpha)
+            group.addAnimation(anim_old)
+
+        group.start()
+        self._nav_sel_group = group
 
     def current_index(self) -> int:
         """Return the active nav index."""
@@ -441,61 +788,61 @@ class NavigationSidebar(ThemedWidget):
     def _update_nav_styles(self) -> None:
         """Apply active/inactive styling to each nav item."""
         c = self.tokens.colors
-        # Border-radius 8px on the right corners only (blueprint spec).
-        radius = self.scaled(self.tokens.radius.sm)   # 8px
-        # 16px left/right padding so text is never squished against the edge.
-        pad_h = self.scaled(self.tokens.spacing.lg)   # 16px
-        accent = self.tokens.colors.accent_cyan
+        radius = self.scaled(self.tokens.radius.sm)   # rounded pill corners
+        side = self.scaled(16)
 
         for index, item in enumerate(self._nav_buttons):
-            if index == self._current:
+            icon_label = item.findChild(QLabel, "NavigationItemIcon")
+            text_label = item.findChild(QLabel, "NavigationItemText")
+            active = index == self._current
+            icon_color = c.text_primary if active else c.text_muted
+            if icon_label is not None:
+                icon_label.setPixmap(
+                    self.icon(_NAV_ICONS[index], icon_color, side).pixmap(
+                        side, side
+                    )
+                )
+            if active:
                 item.setStyleSheet(
-                    # padding-left/right only: geometry is owned by
-                    # setFixedHeight(36px) so vertical padding is irrelevant
-                    # and would fight the fixed height.
-                    f"#NavigationItem {{ color: {accent}; "
-                    f"padding-left: {pad_h}px; padding-right: {pad_h}px; "
-                    f"border-left: 3px solid {accent}; "
-                    f"border-top-right-radius: {radius}px; "
-                    f"border-bottom-right-radius: {radius}px; "
-                    f"background: qlineargradient(x1:0, y1:0, x2:1, y2:0, "
-                    f"stop:0 {c.accent_cyan_glow}, stop:1 transparent); }}"
+                    f"#NavigationItem {{ "
+                    f"border: 1px solid rgba(168, 85, 247, 0.55); "
+                    f"border-radius: {radius}px; "
+                    f"background: rgba(168, 85, 247, 0.18); }} "
+                    f"#NavigationItemText {{ color: {c.text_primary}; "
+                    f"background: transparent; font-weight: 600; }} "
+                    f"#NavigationItemIcon {{ background: transparent; }}"
                 )
             else:
                 item.setStyleSheet(
-                    f"#NavigationItem {{ color: {c.text_secondary}; "
-                    f"padding-left: {pad_h}px; padding-right: {pad_h}px; "
-                    f"border-left: 3px solid transparent; "
-                    f"border-top-right-radius: {radius}px; "
-                    f"border-bottom-right-radius: {radius}px; "
+                    f"#NavigationItem {{ "
+                    f"border: 1px solid transparent; "
+                    f"border-radius: {radius}px; "
                     f"background: transparent; }} "
                     f"#NavigationItem:hover {{ "
-                    f"background: rgba(255, 255, 255, 0.05); "
-                    f"color: {c.text_primary}; }}"
+                    f"background: rgba(255, 255, 255, 0.05); }} "
+                    f"#NavigationItemText {{ color: {c.text_secondary}; "
+                    f"background: transparent; }} "
+                    f"#NavigationItemIcon {{ background: transparent; }}"
                 )
+            _ = text_label
 
     def apply_theme(self) -> None:
-        """Apply the glassmorphic rail backing and refresh nav styling."""
+        """Apply the two-column backing surfaces and refresh nav styling."""
         c = self.tokens.colors
-        radius = self.scaled(self.tokens.radius.md)   # 12px
-        thumb_r = self.scaled(self.tokens.radius.sm)  # 8px
-        # background-color (not the background shorthand) is required for
-        # the fill to paint on a QWidget with WA_StyledBackground. The
-        # paintEvent override above ensures drawPrimitive is called so this
-        # rule actually takes effect.
         self.setStyleSheet(
             f"QWidget#NavigationSidebar {{ "
-            f"background-color: rgba(18, 22, 33, 0.85); "
-            f"border: 1px solid rgba(255, 255, 255, 0.08); "
-            f"border-radius: {radius}px; }} "
+            f"background-color: {c.background_base}; "
+            f"border: none; }} "
+            f"#NavigationSidebarRail {{ "
+            f"background-color: {c.background_base}; "
+            f"border-right: 1px solid {c.border}; }} "
+            f"#NavigationSidebarPanel {{ "
+            f"background-color: {c.surface}; "
+            f"border-right: 1px solid {c.border}; }} "
             f"#NavigationSidebarNav {{ background: transparent; }} "
             f"#NavigationSidebarRecent {{ background: transparent; }} "
-            f"#NavigationRecentRows {{ background: transparent; }} "
-            f"#NavigationRecentThumb {{ background-color: {c.surface_overlay}; "
-            f"border-radius: {thumb_r}px; }} "
-            f"#NavigationRecentName {{ color: {c.text_secondary}; "
-            f"background: transparent; }} "
             f"#NavigationSidebarSystem {{ background: transparent; }} "
-            f"#NavigationSystemRow {{ background: transparent; }}"
+            f"#NavigationSystemRow {{ background: transparent; }} "
+            f"#NavigationSidebarAiStatus {{ background: transparent; }}"
         )
         self._update_nav_styles()

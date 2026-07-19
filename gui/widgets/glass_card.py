@@ -226,14 +226,5 @@ class GlassCard(ThemedWidget):
     # ------------------------------------------------------------------ #
     # Behaviour
     # ------------------------------------------------------------------ #
-    # NOTE (Phase 8C-2): the previous show-time fade-in installed a
-    # QGraphicsOpacityEffect on the card starting at opacity 0.0. Because the
-    # card is also an effect-bearing widget, that transient opacity effect
-    # left the card in a transparent/stale state once the animation was torn
-    # down, so content appeared briefly then vanished. The fade-in is removed
-    # so the card renders at full opacity immediately and stays visible.
-    #
-    # A rendering-safe entrance animation (one that does not stack an opacity
-    # effect on an effect-bearing card) will be revisited in Phase 8H
-    # (Animation & Polish). The `animated` flag still governs the hover glow
-    # transition, so the public API is unchanged.
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)

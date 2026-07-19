@@ -70,6 +70,18 @@ class ColorTokens:
     divider: str
     focus_ring: str
 
+    # --- Extended accents (additive; timeline/overlay category colors) ---
+    accent_pink: str
+    accent_pink_glow: str
+
+    # --- Timeline track category colors (video/overlay/text/fx/audio) ---
+    track_video: str
+    track_overlay: str
+    track_text: str
+    track_fx: str
+    track_audio: str
+    track_voice: str
+
 
 @dataclass(frozen=True)
 class TypeStyle:

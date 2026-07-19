@@ -30,50 +30,65 @@ DARK_THEME_NAME = "dark"
 
 
 _DARK_COLORS = ColorTokens(
-    # Layered navy-slate surfaces with a wide luminance step between each
-    # layer, so the application background, workspace, secondary panels,
-    # primary panels and floating controls read as clearly distinct depths
-    # (this is the main driver of the redesigned hierarchy):
+    # Layered near-black surfaces with a violet cast and a wide luminance
+    # step between each layer, so the application background, workspace,
+    # secondary panels, primary panels and floating controls read as clearly
+    # distinct depths (this is the main driver of the redesigned hierarchy):
     #   background_deep  -> the app void behind everything (deepest)
     #   background_base  -> the application background
     #   surface          -> secondary panels
     #   surface_elevated -> primary panels / cards
     #   surface_overlay  -> floating controls / hover / popups (lightest)
-    background_deep="#04060c",
-    background_base="#0b0f1a",
-    surface="#141a2b",
-    surface_elevated="#1e2740",
-    surface_overlay="#2a3557",
-    # Glass: richer cool translucent fill with a clearer light edge and sheen.
-    glass_fill="rgba(255, 255, 255, 0.06)",
-    glass_border="rgba(255, 255, 255, 0.14)",
-    glass_highlight="rgba(255, 255, 255, 0.22)",
+    background_deep="#07060b",
+    background_base="#0a0810",
+    surface="#120e1c",
+    surface_elevated="#161022",
+    surface_overlay="#221a36",
+    # Glass: violet-tinted translucent fill with a subtle light edge and
+    # sheen (tinted toward the panel color rather than a white haze).
+    glass_fill="rgba(22, 16, 34, 0.62)",
+    glass_border="rgba(168, 130, 240, 0.18)",
+    glass_highlight="rgba(216, 180, 255, 0.20)",
     # Neon accents (base) + softer translucent glow used for outer glow/shadow.
-    # Slightly punchier premium accents (not gaming-RGB).
-    accent_blue="#4f8dff",
-    accent_blue_glow="rgba(79, 141, 255, 0.60)",
-    accent_cyan="#2ee6ff",
-    accent_cyan_glow="rgba(46, 230, 255, 0.60)",
-    accent_purple="#b569ff",
-    accent_purple_glow="rgba(181, 105, 255, 0.60)",
+    # NEXUS purple primary, magenta neon secondary, fuchsia tertiary. The
+    # token names keep their historical "blue"/"cyan" spellings so every
+    # widget retints without renames.
+    accent_blue="#a855f7",
+    accent_blue_glow="rgba(168, 85, 247, 0.55)",
+    accent_cyan="#e879f9",
+    accent_cyan_glow="rgba(232, 121, 249, 0.55)",
+    accent_purple="#d946ef",
+    accent_purple_glow="rgba(217, 70, 239, 0.55)",
     # Text shades with more contrast between levels.
-    text_primary="#f4f7ff",
-    text_secondary="#c2cbe6",
-    text_muted="#828db0",
-    text_disabled="#4d5570",
-    text_on_accent="#04060c",
+    text_primary="#f4f1fa",
+    text_secondary="#c3b8dd",
+    text_muted="#83779f",
+    text_disabled="#4c4363",
+    text_on_accent="#0a0810",
     # Status.
     success="#34d399",
     success_glow="rgba(52, 211, 153, 0.50)",
-    warning="#fbbf24",
-    warning_glow="rgba(251, 191, 36, 0.50)",
+    warning="#f5b93d",
+    warning_glow="rgba(245, 185, 61, 0.50)",
     error="#f87171",
     error_glow="rgba(248, 113, 113, 0.50)",
-    # Lines / focus: slightly stronger so hierarchy reads without heavy
-    # outlines everywhere.
-    border="rgba(255, 255, 255, 0.10)",
-    divider="rgba(255, 255, 255, 0.07)",
-    focus_ring="rgba(46, 230, 255, 0.75)",
+    # Lines / focus: solid violet-slate hairlines so panel edges read crisply
+    # against the deep background.
+    border="#2b2140",
+    divider="rgba(43, 33, 64, 0.60)",
+    focus_ring="rgba(217, 70, 239, 0.75)",
+    # Extended accents (overlay clips / decorative category colors).
+    accent_pink="#ec4899",
+    accent_pink_glow="rgba(236, 72, 153, 0.55)",
+    # Timeline track category colors (match the reference lanes: video =
+    # violet thumbnails, music = green wave, sfx = purple wave, voice =
+    # blue wave, text/subtitles = fuchsia chips).
+    track_video="#8b5cf6",
+    track_overlay="#ec4899",
+    track_text="#c084fc",
+    track_fx="#f5b93d",
+    track_audio="#34d399",
+    track_voice="#38bdf8",
 )
 
 
@@ -97,8 +112,8 @@ _DARK_TYPOGRAPHY = TypographyTokens(
 
 _DARK_SPACING = SpacingTokens(xxs=2, xs=4, sm=8, md=12, lg=16, xl=24, xxl=32)
 
-# Softer, more modern corner scale (still ascending; pill largest).
-_DARK_RADIUS = RadiusTokens(sm=8, md=12, lg=18, xl=26, pill=999)
+# Tighter, denser pro-editor corner scale (still ascending; pill largest).
+_DARK_RADIUS = RadiusTokens(sm=6, md=10, lg=14, xl=20, pill=999)
 
 # Deeper, richer elevation so cards and floating panels genuinely pop off the
 # workspace; stronger neon glows for the accent halo.
@@ -106,9 +121,9 @@ _DARK_SHADOWS = ShadowTokens(
     low=ShadowToken(blur=18, x=0, y=4, color="rgba(0, 0, 0, 0.50)"),
     medium=ShadowToken(blur=36, x=0, y=12, color="rgba(0, 0, 0, 0.62)"),
     high=ShadowToken(blur=64, x=0, y=24, color="rgba(0, 0, 0, 0.72)"),
-    glow_blue=ShadowToken(blur=34, x=0, y=0, color="rgba(79, 141, 255, 0.60)"),
-    glow_cyan=ShadowToken(blur=34, x=0, y=0, color="rgba(46, 230, 255, 0.60)"),
-    glow_purple=ShadowToken(blur=34, x=0, y=0, color="rgba(181, 105, 255, 0.60)"),
+    glow_blue=ShadowToken(blur=34, x=0, y=0, color="rgba(168, 85, 247, 0.55)"),
+    glow_cyan=ShadowToken(blur=34, x=0, y=0, color="rgba(232, 121, 249, 0.55)"),
+    glow_purple=ShadowToken(blur=34, x=0, y=0, color="rgba(217, 70, 239, 0.55)"),
 )
 
 _DARK_BLUR = BlurTokens(panel=18, backdrop=32, heavy=48)

@@ -1,8 +1,8 @@
 """TransportBar: UI-only playback transport controls (Phase 8H, Milestone 2).
 
 A themed transport row composed from the frozen widget library: Play / Pause /
-Stop as text :class:`NeonButton`s (no new icon assets in this milestone) and a
-seek placeholder built on the library :class:`Slider`.
+Stop as icon :class:`NeonButton`s and a seek placeholder built on the library
+:class:`Slider`.
 
 This is a pure UI state machine. It tracks a transport ``state`` -- one of
 ``"stopped"`` / ``"playing"`` / ``"paused"`` -- and a normalized ``position``
@@ -10,14 +10,14 @@ in ``[0.0, 1.0]``. It performs no real playback, opens no media, and never
 touches :mod:`gui_core`. All behaviour is signals + internal state so a future
 milestone can bind it to an actual player.
 
-Phase 10C (professional transport, UI-only, additive): the flat button+seek
-row is arranged into a professional three-zone desktop transport -- a left
-status-badge cluster (GPU / AI / project FPS), a centered large-playback
-control group flanked by soft separators with a monospace timecode readout, a
-right indicator cluster (playback rate / zoom percentage / loop), and a
-full-width seek scrubber row beneath. The extra chrome is composed from the
-existing widget library and is decorative/placeholder wired to nothing; the
-frozen controls, public API, signals and state machine are unchanged.
+NEXUS visual pass (UI-only, layout rebuild of the decorative chrome): the row
+mirrors the reference transport -- a left monospace timecode dropdown pill and
+edit-tool icon cluster, a centered playback control group (frame-step /
+rewind / play / pause / stop / fast-forward), and a right indicator cluster
+(playback rate, Safe Area, aspect / resolution / FPS chips, fullscreen). The
+extra chrome is composed from the existing widget library and is decorative /
+wired to nothing; the frozen controls, public API, signals and state machine
+are unchanged.
 
 Stable object names for later integration and tests:
 
@@ -25,30 +25,27 @@ Stable object names for later integration and tests:
 * ``TransportPlay`` / ``TransportPause`` / ``TransportStop`` -- the buttons
 * ``TransportSeek`` -- the seek slider
 
-Additive Phase 10C object names (decorative chrome, wired to nothing):
+Additive decorative object names (wired to nothing):
 
-* ``TransportBadges`` / ``TransportGpuBadge`` / ``TransportAiBadge`` /
-  ``TransportFpsBadge`` -- the left status cluster.
+* ``TransportTimecode`` -- the monospace timecode readout (left pill).
+* ``TransportTools`` -- the left edit-tool icon cluster.
 * ``TransportControls`` -- the centered playback control group.
-* ``TransportSeparatorLeft`` / ``TransportSeparatorRight`` -- soft separators.
-* ``TransportTimecode`` -- the monospace timecode readout.
-* ``TransportIndicators`` / ``TransportRate`` / ``TransportZoom`` /
-  ``TransportLoop`` -- the right indicator cluster.
+* ``TransportIndicators`` / ``TransportRate`` -- the right indicator cluster.
 * ``TransportSeekRow`` -- the full-width seek scrubber row.
 """
 from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtCore import QAbstractAnimation, QPropertyAnimation, QVariantAnimation, Qt, Signal
+from PySide6.QtGui import QColor
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from gui.theme.manager import ThemeManager
 from gui.widgets.base import ThemedWidget
 from gui.widgets.meta_label import MetaLabel
 from gui.widgets.neon_button import NeonButton
 from gui.widgets.slider import Slider
-from gui.widgets.status_badge import StatusBadge
 
 #: The frozen transport-state vocabulary for this milestone.
 STATES = ("stopped", "playing", "paused")
@@ -92,6 +89,7 @@ class TransportBar(ThemedWidget):
         self._position = 0.0
 
         tokens = self.tokens
+        c = tokens.colors
 
         # Root: a control zone stacked over a full-width seek scrubber.
         outer = QVBoxLayout(self)
@@ -100,123 +98,180 @@ class TransportBar(ThemedWidget):
         )
         outer.setSpacing(tokens.spacing.sm)
 
-        # --- Control zone: left badges | centered controls | right meters --- #
+        # --- Control zone: timecode + tools | centered controls | chips --- #
         control_zone = QHBoxLayout()
         control_zone.setContentsMargins(0, 0, 0, 0)
         control_zone.setSpacing(tokens.spacing.md)
 
-        # Left: decorative status badges (GPU / AI / project FPS).
-        self._badges = QWidget(self)
-        self._badges.setObjectName("TransportBadges")
-        badges_row = QHBoxLayout(self._badges)
-        badges_row.setContentsMargins(0, 0, 0, 0)
-        badges_row.setSpacing(tokens.spacing.xs)
-        self._gpu_badge = StatusBadge(self._theme, "GPU", status="success")
-        self._gpu_badge.setObjectName("TransportGpuBadge")
-        self._ai_badge = StatusBadge(self._theme, "AI", status="info")
-        self._ai_badge.setObjectName("TransportAiBadge")
-        self._fps_badge = StatusBadge(self._theme, "60 FPS", status="neutral")
-        self._fps_badge.setObjectName("TransportFpsBadge")
-        self._status_badge = StatusBadge(self._theme, "Ready", status="info")
-        self._status_badge.setObjectName("TransportStatusBadge")
-        badges_row.addWidget(self._fps_badge)
-        badges_row.addWidget(self._gpu_badge)
-        badges_row.addWidget(self._ai_badge)
-        badges_row.addWidget(self._status_badge)
-        control_zone.addWidget(self._badges, 0)
+        # Left: monospace timecode dropdown pill, per the reference.
+        timecode_wrap = QWidget(self)
+        timecode_wrap.setObjectName("TransportTimecodePill")
+        tc_row = QHBoxLayout(timecode_wrap)
+        tc_row.setContentsMargins(
+            tokens.spacing.sm, tokens.spacing.xxs,
+            tokens.spacing.sm, tokens.spacing.xxs,
+        )
+        tc_row.setSpacing(tokens.spacing.xs)
+        self._timecode = MetaLabel(
+            self._theme, "00:00:47:15", role="secondary", style="mono"
+        )
+        self._timecode.setObjectName("TransportTimecode")
+        tc_row.addWidget(self._timecode, 0, Qt.AlignmentFlag.AlignVCenter)
+        tc_chevron = QLabel(timecode_wrap)
+        tc_chevron.setObjectName("TransportTimecodeChevron")
+        chev = 12
+        try:
+            tc_chevron.setPixmap(
+                self._theme.icons.icon("chevron-down", c.text_muted, chev)
+                .pixmap(chev, chev)
+            )
+        except Exception:  # pragma: no cover - icon optional
+            tc_chevron.setText("⌄")
+        tc_chevron.setStyleSheet(
+            "#TransportTimecodeChevron { background: transparent; }"
+        )
+        tc_row.addWidget(tc_chevron, 0, Qt.AlignmentFlag.AlignVCenter)
+        self._timecode_pill = timecode_wrap
+        control_zone.addWidget(timecode_wrap, 0)
+
+        # Left: decorative edit-tool icon cluster (cut / split / undo / redo).
+        self._tools = QWidget(self)
+        self._tools.setObjectName("TransportTools")
+        tools_row = QHBoxLayout(self._tools)
+        tools_row.setContentsMargins(0, 0, 0, 0)
+        tools_row.setSpacing(tokens.spacing.xxs)
+        tool_side = 30
+        for icon_name, obj in (
+            ("scissors", "TransportToolCut"),
+            ("split", "TransportToolSplit"),
+            ("undo-2", "TransportToolUndo"),
+            ("redo-2", "TransportToolRedo"),
+        ):
+            tool = NeonButton(
+                self._theme, "", variant="ghost", accent="cyan",
+                icon_name=icon_name, icon_color=c.text_secondary,
+                corner_radius=tokens.radius.sm, pad_h=0, pad_v=0,
+            )
+            tool.setObjectName(obj)
+            tool.setFixedSize(tool_side, tool_side)
+            tools_row.addWidget(tool)
+        control_zone.addWidget(self._tools, 0)
 
         control_zone.addStretch(1)
 
-        # Center: the large playback control group with soft separators and a
-        # monospace timecode readout. The frozen Play / Pause / Stop buttons
-        # are added here exactly as before (same handlers and signals).
+        # Center: the playback control group. The frozen Play / Pause / Stop
+        # buttons are added here exactly as before (same handlers/signals),
+        # flanked by frame-step and rewind / fast-forward placeholders.
         self._controls = QWidget(self)
         self._controls.setObjectName("TransportControls")
         controls_row = QHBoxLayout(self._controls)
         controls_row.setContentsMargins(0, 0, 0, 0)
         controls_row.setSpacing(tokens.spacing.sm)
 
-        self._timecode = MetaLabel(
-            self._theme, "00:00:00:00", role="secondary", style="mono"
-        )
-        self._timecode.setObjectName("TransportTimecode")
-        controls_row.addWidget(self._timecode)
-
-        self._separator_left = QFrame(self._controls)
-        self._separator_left.setObjectName("TransportSeparatorLeft")
-        self._separator_left.setFrameShape(QFrame.Shape.VLine)
-        controls_row.addWidget(self._separator_left)
-
-        # Previous-frame step (decorative placeholder, wired to nothing).
+        side = 34
         self._prev_frame = NeonButton(
-            self._theme, "\u23ee", variant="ghost", accent="cyan"
+            self._theme, "", variant="ghost", accent="cyan",
+            icon_name="skip-back", icon_color=c.text_secondary,
+            corner_radius=side // 2, pad_h=0, pad_v=0,
         )
         self._prev_frame.setObjectName("TransportPrevFrame")
+        self._prev_frame.setFixedSize(side, side)
         controls_row.addWidget(self._prev_frame)
 
-        self._play = NeonButton(self._theme, "Play", variant="primary", accent="cyan")
+        self._rewind = NeonButton(
+            self._theme, "", variant="ghost", accent="cyan",
+            icon_name="rewind", icon_color=c.text_secondary,
+            corner_radius=side // 2, pad_h=0, pad_v=0,
+        )
+        self._rewind.setObjectName("TransportRewind")
+        self._rewind.setFixedSize(side, side)
+        controls_row.addWidget(self._rewind)
+
+        play_side = 44
+        self._play = NeonButton(
+            self._theme, "", variant="primary", accent="blue",
+            icon_name="play", icon_color=c.text_primary,
+            corner_radius=play_side // 2, pad_h=0, pad_v=0,
+        )
         self._play.setObjectName("TransportPlay")
+        self._play.setFixedSize(play_side, play_side)
         self._play.clicked.connect(self._on_play)
         controls_row.addWidget(self._play)
 
-        self._pause = NeonButton(self._theme, "Pause", variant="secondary", accent="cyan")
+        self._pause = NeonButton(
+            self._theme, "", variant="secondary", accent="cyan",
+            icon_name="pause", icon_color=c.text_primary,
+            corner_radius=side // 2, pad_h=0, pad_v=0,
+        )
         self._pause.setObjectName("TransportPause")
+        self._pause.setFixedSize(side, side)
         self._pause.clicked.connect(self._on_pause)
         controls_row.addWidget(self._pause)
 
-        self._stop = NeonButton(self._theme, "Stop", variant="ghost", accent="cyan")
+        self._stop = NeonButton(
+            self._theme, "", variant="ghost", accent="cyan",
+            icon_name="stop", icon_color=c.text_secondary,
+            corner_radius=side // 2, pad_h=0, pad_v=0,
+        )
         self._stop.setObjectName("TransportStop")
+        self._stop.setFixedSize(side, side)
         self._stop.clicked.connect(self._on_stop)
         controls_row.addWidget(self._stop)
 
-        # Next-frame step (decorative placeholder, wired to nothing).
+        self._fast_forward = NeonButton(
+            self._theme, "", variant="ghost", accent="cyan",
+            icon_name="fast-forward", icon_color=c.text_secondary,
+            corner_radius=side // 2, pad_h=0, pad_v=0,
+        )
+        self._fast_forward.setObjectName("TransportFastForward")
+        self._fast_forward.setFixedSize(side, side)
+        controls_row.addWidget(self._fast_forward)
+
         self._next_frame = NeonButton(
-            self._theme, "\u23ed", variant="ghost", accent="cyan"
+            self._theme, "", variant="ghost", accent="cyan",
+            icon_name="skip-forward", icon_color=c.text_secondary,
+            corner_radius=side // 2, pad_h=0, pad_v=0,
         )
         self._next_frame.setObjectName("TransportNextFrame")
+        self._next_frame.setFixedSize(side, side)
         controls_row.addWidget(self._next_frame)
-
-        # Loop toggle (decorative placeholder, wired to nothing).
-        self._loop_button = NeonButton(
-            self._theme, "Loop", variant="ghost", accent="purple"
-        )
-        self._loop_button.setObjectName("TransportLoopButton")
-        controls_row.addWidget(self._loop_button)
-
-        self._separator_right = QFrame(self._controls)
-        self._separator_right.setObjectName("TransportSeparatorRight")
-        self._separator_right.setFrameShape(QFrame.Shape.VLine)
-        controls_row.addWidget(self._separator_right)
 
         control_zone.addWidget(self._controls, 0)
 
         control_zone.addStretch(1)
 
-        # Right: decorative indicator meters (rate / zoom / loop).
+        # Right: playback rate + Safe Area + format chips + fullscreen, per
+        # the reference (decorative, wired to nothing).
         self._indicators = QWidget(self)
         self._indicators.setObjectName("TransportIndicators")
         indicators_row = QHBoxLayout(self._indicators)
         indicators_row.setContentsMargins(0, 0, 0, 0)
-        indicators_row.setSpacing(tokens.spacing.md)
+        indicators_row.setSpacing(tokens.spacing.xs)
         self._rate = MetaLabel(self._theme, "1.0x", role="muted", style="mono")
         self._rate.setObjectName("TransportRate")
-        self._zoom = MetaLabel(self._theme, "100%", role="muted", style="mono")
-        self._zoom.setObjectName("TransportZoom")
-        self._render_quality = MetaLabel(
-            self._theme, "Full", role="muted", style="body_small"
+        indicators_row.addWidget(self._rate, 0, Qt.AlignmentFlag.AlignVCenter)
+        self._chips: list[QLabel] = []
+        for chip_text, obj, active in (
+            ("Safe Area", "TransportSafeArea", False),
+            ("16:9", "TransportAspectChip", False),
+            ("4K", "TransportResChip", True),
+            ("60 FPS", "TransportFpsChip", False),
+        ):
+            chip = QLabel(chip_text, self._indicators)
+            chip.setObjectName(obj)
+            chip.setProperty("chipActive", active)
+            chip.setFont(self._theme.font("caption"))
+            chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._chips.append(chip)
+            indicators_row.addWidget(chip, 0, Qt.AlignmentFlag.AlignVCenter)
+        self._fullscreen = NeonButton(
+            self._theme, "", variant="ghost", accent="cyan",
+            icon_name="monitor", icon_color=c.text_secondary,
+            corner_radius=tokens.radius.sm, pad_h=0, pad_v=0,
         )
-        self._render_quality.setObjectName("TransportRenderQuality")
-        self._preview_res = MetaLabel(
-            self._theme, "1920x1080", role="muted", style="mono"
-        )
-        self._preview_res.setObjectName("TransportPreviewRes")
-        self._loop = MetaLabel(self._theme, "Loop", role="muted", style="body_small")
-        self._loop.setObjectName("TransportLoop")
-        indicators_row.addWidget(self._rate)
-        indicators_row.addWidget(self._zoom)
-        indicators_row.addWidget(self._render_quality)
-        indicators_row.addWidget(self._preview_res)
-        indicators_row.addWidget(self._loop)
+        self._fullscreen.setObjectName("TransportFullscreen")
+        self._fullscreen.setFixedSize(30, 30)
+        indicators_row.addWidget(self._fullscreen)
         control_zone.addWidget(self._indicators, 0)
 
         outer.addLayout(control_zone)
@@ -273,13 +328,16 @@ class TransportBar(ThemedWidget):
 
         Updates the slider to reflect an externally-driven position. Does not
         re-emit :attr:`seek_requested` (that is reserved for user-driven
-        changes).
+        changes). Also triggers a subtle opacity pulse on the timecode label
+        so the update is visually noticeable.
         """
         clamped = max(0.0, min(1.0, float(value)))
         self._position = clamped
         self._seek.blockSignals(True)
         self._seek.set_value(clamped)
         self._seek.blockSignals(False)
+        # Micro-fade the timecode label on position change.
+        self._pulse_timecode()
 
     # ------------------------------------------------------------------ #
     # Internal handlers (UI-only state machine)
@@ -305,48 +363,69 @@ class TransportBar(ThemedWidget):
         self._position = max(0.0, min(1.0, float(value)))
         self.seek_requested.emit(self._position)
 
+    def _pulse_timecode(self) -> None:
+        """Briefly flash the timecode label for visual feedback."""
+        from PySide6.QtCore import QTimer
+        label = self._timecode._label if hasattr(self._timecode, '_label') else self._timecode
+        c = self.tokens.colors
+        label.setStyleSheet(
+            f"#TransportTimecode {{ color: {c.text_primary}; "
+            f"background: transparent; }}"
+        )
+        QTimer.singleShot(
+            self._theme.duration("fast"),
+            lambda: label.setStyleSheet(
+                f"#TransportTimecode {{ color: {c.accent_cyan}; "
+                f"background: transparent; }}"
+            ),
+        )
+
     # ------------------------------------------------------------------ #
     # Theming
     # ------------------------------------------------------------------ #
     def apply_theme(self) -> None:
         """Apply the premium transport-bar chrome to the row surface.
 
-        Styling-only (Phase 10B): object-name-scoped, token-derived QSS that
-        makes the transport read as a docked, glassy control strip (an
-        elevated surface with a subtle vertical gradient, a soft glass border
-        and rounded corners). The composed child widgets (the Play / Pause /
-        Stop NeonButtons and the seek Slider) keep their own self-theming; no
-        logic, signal, object name or API changes.
+        Styling-only: object-name-scoped, token-derived QSS that makes the
+        transport read as a docked, glassy control strip. The composed child
+        widgets (the Play / Pause / Stop NeonButtons and the seek Slider)
+        keep their own self-theming; no logic, signal, object name or API
+        changes.
         """
         colors = self.tokens.colors
-        radius_lg = self.tokens.radius.lg
+        r = self.tokens.radius
+        s = self.tokens.spacing
 
-        # Transport root: a layered elevated surface with a subtle vertical
-        # gradient, a soft glass border and rounded corners, so the transport
-        # reads as a first-class docked control strip. The zone containers are
-        # transparent so the root surface reads as a single glass bar.
+        # Transport root + timecode pill + format chips.
         self.setStyleSheet(
             f"#TransportBar {{ background: qlineargradient("
             f"x1: 0, y1: 0, x2: 0, y2: 1, "
             f"stop: 0 {colors.surface_elevated}, "
             f"stop: 1 {colors.surface}); "
             f"border: 1px solid {colors.border}; "
-            f"border-radius: {radius_lg}px; }} "
-            f"#TransportBadges, #TransportControls, #TransportIndicators, "
-            f"#TransportSeekRow {{ background: transparent; }}"
+            f"border-radius: {r.lg}px; }} "
+            f"#TransportTools, #TransportControls, #TransportIndicators, "
+            f"#TransportSeekRow {{ background: transparent; }} "
+            f"#TransportTimecodePill {{ "
+            f"background: {colors.surface}; "
+            f"border: 1px solid {colors.border}; "
+            f"border-radius: {r.sm}px; }} "
+            # Format chips: quiet bordered pills; the active one (4K) is a
+            # purple-tinted pill like the reference.
+            f"#TransportSafeArea, #TransportAspectChip, #TransportFpsChip {{ "
+            f"color: {colors.text_muted}; background: {colors.surface}; "
+            f"border: 1px solid {colors.border}; "
+            f"border-radius: {r.sm}px; "
+            f"padding: {s.xxs}px {s.xs + 2}px; }} "
+            f"#TransportResChip {{ "
+            f"color: {colors.text_primary}; "
+            f"background: rgba(168, 85, 247, 0.22); "
+            f"border: 1px solid rgba(168, 85, 247, 0.55); "
+            f"border-radius: {r.sm}px; "
+            f"padding: {s.xxs}px {s.xs + 2}px; }}"
         )
 
-        # Soft vertical separators framing the centered control group.
-        separator_qss = (
-            f"QFrame#TransportSeparatorLeft, QFrame#TransportSeparatorRight {{ "
-            f"color: {colors.divider}; "
-            f"background: {colors.divider}; "
-            f"border: none; max-width: 1px; }}"
-        )
-        self._separator_left.setStyleSheet(separator_qss)
-        self._separator_right.setStyleSheet(separator_qss)
-
-        # Monospace timecode readout: an accent-cyan, mono chrome value.
+        # Monospace timecode readout: accent-tinted mono chrome value.
         self._timecode.setStyleSheet(
             f"#TransportTimecode {{ color: {colors.accent_cyan}; "
             f"background: transparent; }}"

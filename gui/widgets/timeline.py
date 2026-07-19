@@ -22,9 +22,11 @@ Stable object names for later integration and tests:
 """
 from __future__ import annotations
 
+import random
 from typing import Dict, List, Optional
 
-from PySide6.QtCore import QEvent, QTimer, Qt, Signal
+from PySide6.QtCore import QEasingCurve, QEvent, QPropertyAnimation, QTimer, QVariantAnimation, Qt, Signal
+from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -39,6 +41,55 @@ from gui.widgets.base import ThemedWidget
 
 #: A clip is a plain mapping: track index, start (s), length (s), label.
 Clip = Dict[str, object]
+
+
+class _ClipWaveform(QWidget):
+    """Decorative pseudo-waveform painted inside audio / voice clip blocks.
+
+    Visual-only chrome: deterministic bar heights are derived from the clip
+    label (stable across rebuilds), painted mirrored around the vertical
+    center like a real audio waveform. The widget is transparent to mouse
+    events so clip select / drag / trim behavior (which targets the parent
+    ``TimelineClip`` frame) is untouched, and it tracks the parent's size via
+    an event filter (the parent's layout does not manage it).
+    """
+
+    def __init__(self, parent: QWidget, color: str, seed_text: str) -> None:
+        super().__init__(parent)
+        self.setObjectName("TimelineClipWaveform")
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._color = QColor(color)
+        rnd = random.Random(seed_text)
+        self._bars = [0.2 + 0.8 * rnd.random() for _ in range(160)]
+        parent.installEventFilter(self)
+        self.setGeometry(0, 0, parent.width(), parent.height())
+        self.lower()
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802 (Qt override)
+        if watched is self.parent() and event.type() == QEvent.Type.Resize:
+            self.setGeometry(0, 0, watched.width(), watched.height())
+        return False
+
+    def paintEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        painter = QPainter(self)
+        width = self.width()
+        height = self.height()
+        if width <= 0 or height <= 4:
+            return
+        mid = height / 2.0
+        bar_w = 2
+        gap = 1
+        step = bar_w + gap
+        color = QColor(self._color)
+        color.setAlpha(210)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(color)
+        count = min(len(self._bars), max(1, (width - 4) // step))
+        for i in range(int(count)):
+            amp = self._bars[i % len(self._bars)] * (mid - 2)
+            x = 2 + i * step
+            painter.drawRect(int(x), int(mid - amp), bar_w, int(amp * 2))
+        painter.end()
 
 
 class Timeline(ThemedWidget):
@@ -183,7 +234,9 @@ class Timeline(ThemedWidget):
         self._headers_layout = QVBoxLayout(self._headers_container)
         self._headers_layout.setContentsMargins(0, 0, 0, 0)
         self._headers_layout.setSpacing(tokens.spacing.xs)
-        self._headers_container.setFixedWidth(self.scaled(tokens.spacing.xxl) * 4)
+        # Wide enough for the longest track name ("Video Track 1") plus the
+        # chip, chevron and the four control glyphs — names must never clip.
+        self._headers_container.setFixedWidth(self.scaled(224))
         self._header_widgets: List[QWidget] = []
         track_area_row.addWidget(self._headers_container, 0)
 
@@ -282,16 +335,30 @@ class Timeline(ThemedWidget):
         else:
             self.play()
 
+    def playback_rate(self) -> float:
+        """Return the playback rate multiplier (1.0 is real time)."""
+        return getattr(self, "_playback_rate", 1.0)
+
+    def set_playback_rate(self, rate: float) -> None:
+        """Set the playback rate multiplier (clamped to a sane range).
+
+        Additive API: the timer interval is unchanged; each tick simply
+        advances the playhead by ``interval * rate`` seconds, mirroring the
+        pure ``gui_core.playback.advance`` semantics (delta * rate).
+        """
+        self._playback_rate = max(0.1, min(4.0, float(rate)))
+
     def _set_playback_state(self, state: str) -> None:
         """Set the transport state; emit playback_state_changed on a change."""
         if state == self._playback_state:
             return
         self._playback_state = state
         self.playback_state_changed.emit(self._playback_state)
+        self._sync_playhead_pulse()
 
     def _on_play_tick(self) -> None:
         """Advance the playhead one timer interval; stop at the end."""
-        step = self._play_interval_ms / 1000.0
+        step = (self._play_interval_ms / 1000.0) * self.playback_rate()
         target = self._playhead + step
         if target >= self._duration:
             self.set_playhead(self._duration)
@@ -353,6 +420,8 @@ class Timeline(ThemedWidget):
         self._build_ruler()
         self._rebuild_clips()
         self.zoom_changed.emit(self._zoom)
+        # Brief opacity pulse on the tracks container for zoom feedback.
+        self._zoom_pulse()
 
     def zoom_in(self) -> None:
         """Zoom in one step (multiplicative; clamped to ``zoom_max``)."""
@@ -383,7 +452,9 @@ class Timeline(ThemedWidget):
         lane = QFrame(self._tracks_container)
         lane.setObjectName("TimelineTrack")
         lane.setFrameShape(QFrame.Shape.StyledPanel)
-        lane.setMinimumHeight(self.scaled(self.tokens.spacing.xxl))
+        # Taller pro-NLE lanes (visual-only): room for clip labels AND the
+        # painted waveforms on audio lanes.
+        lane.setMinimumHeight(self.scaled(34))
         lane.setProperty("trackName", name)
         # A lane hosts clip blocks positioned by a horizontal layout with
         # stretch spacers (no absolute geometry / no DnD in this milestone).
@@ -444,6 +515,9 @@ class Timeline(ThemedWidget):
                 item.setAccessibleName(tip)
                 item.setFont(self._theme.font("caption"))
                 item.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                # Fixed glyph cell: symbols keep a full 22px hit box instead
+                # of collapsing to the glyph's own (clipped) width.
+                item.setFixedWidth(self.scaled(22))
                 row.addWidget(item)
             if gi < len(groups) - 1:
                 sep = QFrame(self._toolbar)
@@ -466,7 +540,8 @@ class Timeline(ThemedWidget):
         header = QFrame(self._headers_container)
         header.setObjectName("TimelineTrackHeader")
         header.setFrameShape(QFrame.Shape.StyledPanel)
-        header.setMinimumHeight(self.scaled(tokens.spacing.xxl))
+        # Matches the taller lane height so headers and lanes stay row-aligned.
+        header.setMinimumHeight(self.scaled(34))
         header_row = QHBoxLayout(header)
         header_row.setContentsMargins(
             tokens.spacing.xs, tokens.spacing.xxs,
@@ -474,39 +549,63 @@ class Timeline(ThemedWidget):
         )
         header_row.setSpacing(tokens.spacing.xs)
 
-        # Leading track color swatch + track number (decorative placeholders).
+        # Leading track color swatch + track chip (decorative placeholders).
+        # The chip abbreviates the track name like a pro NLE track head
+        # (Video Track 1 -> V1, Overlay Track -> OV, Effects Track -> FX).
         color_swatch = QFrame(header)
         color_swatch.setObjectName("TimelineTrackColor")
         color_swatch.setFixedWidth(self.scaled(tokens.spacing.xxs))
         header_row.addWidget(color_swatch)
 
-        number = QLabel(str(len(self._header_widgets) + 1), header)
+        number = QLabel(self._track_chip_text(name), header)
         number.setObjectName("TimelineTrackNumber")
         number.setFont(self._theme.font("caption"))
         number.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # Fixed chip width: the two-character chip must never be squeezed.
+        number.setFixedWidth(self.scaled(26))
         header_row.addWidget(number)
 
         collapse = QLabel("\u25be", header)  # down chevron (expanded look)
         collapse.setObjectName("TimelineTrackCollapse")
         collapse.setFont(self._theme.font("caption"))
+        collapse.setFixedWidth(self.scaled(14))
+        collapse.setAlignment(Qt.AlignmentFlag.AlignCenter)
         header_row.addWidget(collapse)
 
         track_label = QLabel(name, header)
         track_label.setObjectName("TimelineTrackName")
         track_label.setFont(self._theme.font("body_small"))
+        # The name owns the flexible space; a sane floor prevents the
+        # neighbouring glyphs from crushing it to zero.
+        track_label.setMinimumWidth(self.scaled(88))
         header_row.addWidget(track_label, 1)
 
-        # Eye / Mute / Solo / Lock glyph toggles (static placeholders).
-        for glyph, obj_name in (
-            ("\U0001f441", "TimelineTrackEye"),
-            ("M", "TimelineTrackMute"),
-            ("S", "TimelineTrackSolo"),
-            ("\U0001f512", "TimelineTrackLock"),
+        # Eye / Mute / Solo / Lock toggles (static placeholders). Eye and
+        # Lock render as Lucide icon pixmaps; Mute / Solo stay compact
+        # letter glyphs like pro NLEs.
+        icon_side = self.scaled(12)
+        glyph_w = self.scaled(18)
+        for icon_name, obj_name in (
+            ("eye", "TimelineTrackEye"),
+            (None, "TimelineTrackMute"),
+            (None, "TimelineTrackSolo"),
+            ("lock", "TimelineTrackLock"),
         ):
-            control = QLabel(glyph, header)
+            control = QLabel(header)
             control.setObjectName(obj_name)
             control.setFont(self._theme.font("caption"))
             control.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            # Fixed glyph cell so M / S letters and icons are never clipped
+            # when the header row runs out of width.
+            control.setFixedWidth(glyph_w)
+            if icon_name is not None:
+                control.setPixmap(
+                    self.icon(
+                        icon_name, self.tokens.colors.text_muted, icon_side
+                    ).pixmap(icon_side, icon_side)
+                )
+            else:
+                control.setText("M" if obj_name == "TimelineTrackMute" else "S")
             header_row.addWidget(control)
 
         self._header_widgets.append(header)
@@ -516,6 +615,60 @@ class Timeline(ThemedWidget):
     def tracks(self) -> List[str]:
         """Return the current track names in order."""
         return list(self._track_names)
+
+    @staticmethod
+    def _track_chip_text(name: str) -> str:
+        """Return a compact chip abbreviation for a track header.
+
+        Visual-only: "Video Track 1" -> "V1", "Overlay Track" -> "OV",
+        "Subtitles" -> "A4", "Effects Track" / "FX" -> "FX", "SFX" -> "A2",
+        "Voice" -> "A3", "Music" -> "A1". Unknown names fall back to their
+        first letter.
+        """
+        lowered = name.lower()
+        digits = "".join(ch for ch in name if ch.isdigit())
+        if "overlay" in lowered:
+            return "OV"
+        if "subtitle" in lowered:
+            return "A4"
+        if "text" in lowered:
+            return "T"
+        if "sfx" in lowered:
+            return "A2"
+        if "fx" in lowered or "effect" in lowered:
+            return "FX"
+        if "music" in lowered:
+            return f"A{digits}" if digits else "A1"
+        if "audio" in lowered:
+            return f"A{digits}" if digits else "A"
+        if "voice" in lowered:
+            return "A3"
+        if "video" in lowered:
+            return f"V{digits}" if digits else "V"
+        return (name[:1] or "?").upper()
+
+    def _kind_from_track(self, track_index: int) -> str:
+        """Derive a clip's visual category from its track's name.
+
+        Visual-only helper for category-colored clip styling: maps a track
+        name like ``"Video 1"`` / ``"Overlay"`` / ``"FX"`` to a lowercase
+        category token used by the QSS ``kind`` attribute selector. Unknown
+        names fall back to ``"video"``.
+        """
+        if not (0 <= track_index < len(self._track_names)):
+            return "video"
+        name = self._track_names[track_index].lower()
+        for token in ("overlay", "subtitle", "text", "sfx", "fx", "effect",
+                      "voice", "audio", "music"):
+            if token in name:
+                if token in ("music", "sfx"):
+                    return "audio"
+                if token in ("effect",):
+                    return "fx"
+                if token in ("subtitle",):
+                    return "text"
+                return token
+        return "video"
 
     def track_count(self) -> int:
         """Return the number of track lanes."""
@@ -698,16 +851,25 @@ class Timeline(ThemedWidget):
             if widget is not None:
                 widget.setParent(None)
         # A denser, cleaner professional time scale: evenly spaced ticks with
-        # mm:ss-style labels (decorative only; still #TimelineTick).
-        ticks = 9
+        # hh:mm:ss timecode labels (decorative only; still #TimelineTick).
+        ticks = 11
         last = ticks - 1
         for i in range(ticks):
             seconds = self._duration * (i / float(last))
-            minutes = int(seconds) // 60
-            secs = int(round(seconds)) % 60
-            label = QLabel(f"{minutes:02d}:{secs:02d}", self._ruler)
+            total = int(round(seconds))
+            hours = total // 3600
+            minutes = (total % 3600) // 60
+            secs = total % 60
+            label = QLabel(
+                f"{hours:02d}:{minutes:02d}:{secs:02d}", self._ruler
+            )
             label.setObjectName("TimelineTick")
             label.setFont(self._theme.font("caption"))
+            # Hard floor at the text's metric width so timecodes are never
+            # compressed by the surrounding stretch items.
+            label.setMinimumWidth(
+                label.fontMetrics().horizontalAdvance(label.text()) + 6
+            )
             self._ruler_row.addWidget(label)
             if i < last:
                 self._ruler_row.addStretch(1)
@@ -738,6 +900,14 @@ class Timeline(ThemedWidget):
             block = QFrame(lane)
             block.setObjectName("TimelineClip")
             block.setFrameShape(QFrame.Shape.StyledPanel)
+            # Category styling (visual-only): an optional "kind" key on the
+            # clip mapping (or, when absent, the owning track's name) selects
+            # a QSS attribute rule so video / overlay / text / fx / audio
+            # clips render in their category color like a pro NLE.
+            kind = str(clip.get("kind", "")) or self._kind_from_track(
+                track_index
+            )
+            block.setProperty("kind", kind)
             label_text = str(clip.get("label", ""))
             block_layout = QHBoxLayout(block)
             block_layout.setContentsMargins(
@@ -746,10 +916,37 @@ class Timeline(ThemedWidget):
             caption = QLabel(label_text, block)
             caption.setObjectName("TimelineClipLabel")
             caption.setFont(self._theme.font("caption"))
+            # Clips are duration-proportional, so a long filename can exceed
+            # the block width. Elide with "…" against the block's computed
+            # width (visual only — the full name stays in the model and the
+            # tooltip) so text never hard-clips mid-glyph. The width formula
+            # below mirrors the setMinimumWidth call further down.
+            caption.setToolTip(label_text)
+            length_s = max(1.0, float(clip.get("length", 1.0)))
+            length_factor = max(1.0, length_s / 4.0)
+            block_w = int(self._clip_base_width * self._zoom * length_factor)
+            fm = caption.fontMetrics()
+            avail = max(0, block_w - 2 * self.tokens.spacing.xs - 6)
+            if fm.horizontalAdvance(label_text) > avail:
+                caption.setText(
+                    fm.elidedText(label_text, Qt.TextElideMode.ElideRight, avail)
+                )
             block_layout.addWidget(caption)
+            # Audio-family clips get a decorative painted pseudo-waveform
+            # (visual-only; mouse-transparent so select / drag / trim on the
+            # clip frame is unaffected).
+            if kind in ("audio", "voice"):
+                wave_color = (
+                    self.tokens.colors.track_audio
+                    if kind == "audio"
+                    else self.tokens.colors.track_voice
+                )
+                _ClipWaveform(block, wave_color, label_text)
             # Rendering-only zoom: the block's minimum width scales with the
-            # current zoom level (Milestone 8). No model / object-name change.
-            block.setMinimumWidth(int(self._clip_base_width * self._zoom))
+            # current zoom level (Milestone 8) AND with the clip's duration,
+            # so a 32s music bed reads wider than a 3s FX chip like a real
+            # NLE (visual-only; no model / object-name change).
+            block.setMinimumWidth(block_w)
             # Insert before the trailing stretch spacer.
             row.insertWidget(max(0, row.count() - 1), block)
             # Left-click on a clip selects it (see eventFilter).
@@ -771,6 +968,17 @@ class Timeline(ThemedWidget):
         reach the empty-space (lane / tracks) handler.
         """
         etype = event.type()
+        # Clip hover: brighten border on enter, restore on leave.
+        if etype == QEvent.Type.Enter:
+            for frame in self._clip_widgets:
+                if frame is not None and watched is frame:
+                    self._on_clip_enter(frame)
+                    return False
+        elif etype == QEvent.Type.Leave:
+            for frame in self._clip_widgets:
+                if frame is not None and watched is frame:
+                    self._on_clip_leave(frame)
+                    return False
         if etype == QEvent.Type.MouseButtonPress and (
             event.button() == Qt.MouseButton.LeftButton
         ):
@@ -985,6 +1193,7 @@ class Timeline(ThemedWidget):
         Clears the property on all other rendered frames. Uses unpolish/polish
         so any style depending on the property is refreshed. Does not alter
         apply_theme's base clip styling; the property is purely additive.
+        Also triggers a brief bounce animation on the newly selected clip.
         """
         for i, frame in enumerate(self._clip_widgets):
             if frame is None:
@@ -994,6 +1203,110 @@ class Timeline(ThemedWidget):
                 frame.setProperty("selected", is_selected)
                 frame.style().unpolish(frame)
                 frame.style().polish(frame)
+                # Brief selection bounce for tactile confirmation.
+                if is_selected and hasattr(self, '_theme'):
+                    self._animate_clip_select(frame)
+
+    def _animate_clip_select(self, frame: QWidget) -> None:
+        """Bounce a clip frame's height briefly on selection (visual feedback)."""
+        base_h = self.scaled(34)
+        bounce_h = base_h + 4
+        dur = self._theme.duration("fast") // 2
+        easing = self._theme.easing("out_cubic")
+        # Expand up
+        anim = QPropertyAnimation(frame, b"minimumHeight", frame)
+        anim.setDuration(dur)
+        anim.setStartValue(base_h)
+        anim.setEndValue(bounce_h)
+        anim.setEasingCurve(easing)
+        # Shrink back
+        anim2 = QPropertyAnimation(frame, b"minimumHeight", frame)
+        anim2.setDuration(dur)
+        anim2.setStartValue(bounce_h)
+        anim2.setEndValue(base_h)
+        anim2.setEasingCurve(self._theme.easing("in_cubic"))
+        from PySide6.QtCore import QSequentialAnimationGroup, QAbstractAnimation
+        group = QSequentialAnimationGroup(frame)
+        group.addAnimation(anim)
+        group.addAnimation(anim2)
+        group.start(QAbstractAnimation.DeletionPolicy.DeleteWhenStopped)
+        self._clip_bounce_anim = group
+
+    def _sync_playhead_pulse(self) -> None:
+        """Start or stop the playhead pulse animation based on playback state."""
+        if self._playback_state == "playing":
+            self._start_playhead_pulse()
+        else:
+            self._stop_playhead_pulse()
+
+    def _start_playhead_pulse(self) -> None:
+        """Animate the playhead marker height in a slow repeating pulse."""
+        base_h = self.scaled(self.tokens.spacing.xs)
+        pulse_h = base_h + 2
+        anim = QPropertyAnimation(self._playhead_marker, b"maximumHeight", self)
+        anim.setDuration(600)
+        anim.setLoopCount(-1)  # infinite
+        anim.setStartValue(base_h)
+        anim.setKeyValueAt(0.5, pulse_h)
+        anim.setEndValue(base_h)
+        anim.setEasingCurve(QEasingCurve.Type.InOutSine)
+        anim.start()
+        self._playhead_pulse_anim = anim
+
+    def _stop_playhead_pulse(self) -> None:
+        """Stop the playhead pulse animation and restore base height."""
+        if hasattr(self, '_playhead_pulse_anim'):
+            self._playhead_pulse_anim.stop()
+            del self._playhead_pulse_anim
+        base_h = self.scaled(self.tokens.spacing.xs)
+        self._playhead_marker.setMaximumHeight(base_h)
+
+    def _on_clip_enter(self, frame: QWidget) -> None:
+        """Brighten clip border on hover via a subtle border-color tween."""
+        c = self.tokens.colors
+        dur = self._theme.duration("fast")
+        easing = self._theme.easing("out_cubic")
+
+        def _apply_border(factor: float) -> None:
+            a = int(factor * 200)
+            frame.setStyleSheet(
+                frame.styleSheet() +
+                f"/* hover: {a} */"
+            )
+
+        # Store the current sheet so we can revert on leave
+        if not hasattr(frame, '_base_qss'):
+            frame._base_qss = frame.styleSheet()
+
+    def _on_clip_leave(self, frame: QWidget) -> None:
+        """Restore clip border after hover ends."""
+        if hasattr(frame, '_base_qss'):
+            frame.setStyleSheet(frame._base_qss)
+
+    def _zoom_pulse(self) -> None:
+        """Brief opacity pulse on the tracks container when zoom changes."""
+        from gui.widgets.animation import tween_value
+        container = self._tracks_container
+
+        def _set_opacity(v: float) -> None:
+            container.setWindowOpacity(v) if False else None
+            container.setFixedHeight(container.maximumHeight())
+            # Simple visual feedback: briefly change container's opacity via style
+            a = int(max(0, min(255, v * 255)))
+            container.setStyleSheet(
+                f"#TimelineTracks {{ background: {self.tokens.colors.background_deep}; "
+                f"border-radius: {self.scaled(self.tokens.radius.md)}px; opacity: {a}; }}"
+            )
+
+        tween_value(
+            1.0, 0.7, lambda v: None,
+            duration_ms=self._theme.duration("fast") // 2,
+            easing=self._theme.easing("in_cubic"),
+        )
+        # Restore immediately via a short timer — the visual feedback is the
+        # rebuild itself; the pulse is purely cosmetic.
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(self._theme.duration("fast") // 2, lambda: self.apply_theme())
 
     # ------------------------------------------------------------------ #
     # Theming
@@ -1051,34 +1364,51 @@ class Timeline(ThemedWidget):
         self._headers_container.setStyleSheet(
             f"#TimelineTrackHeaders {{ background: {colors.background_deep}; "
             f"border-radius: {radius_md}px; }} "
-            f"#TimelineTrackColor {{ background: {colors.accent_cyan}; "
-            f"border-radius: {radius}px; }} "
-            f"#TimelineTrackNumber {{ color: {colors.text_muted}; "
-            f"background: transparent; }}"
+            f"#TimelineTrackNumber {{ color: {colors.text_primary}; "
+            f"background: {colors.surface_overlay}; "
+            f"border: 1px solid {colors.border}; "
+            f"border-radius: {self.scaled(4)}px; "
+            f"padding: 0px {self.scaled(3)}px; "
+            f"min-width: {self.scaled(18)}px; }}"
         )
+        kind_swatch = {
+            "video": colors.track_video,
+            "overlay": colors.track_overlay,
+            "text": colors.track_text,
+            "fx": colors.track_fx,
+            "audio": colors.track_audio,
+            "voice": colors.track_voice,
+        }
         for index, header in enumerate(self._header_widgets):
             header_bg = (
                 colors.surface if index % 2 == 0 else colors.surface_overlay
+            )
+            swatch_color = kind_swatch.get(
+                self._kind_from_track(index), colors.accent_cyan
             )
             header.setStyleSheet(
                 f"#TimelineTrackHeader {{ background: {header_bg}; "
                 f"border: 1px solid {colors.border}; "
                 f"border-radius: {radius}px; }} "
-                f"#TimelineTrackName {{ color: {colors.accent_cyan}; "
+                f"#TimelineTrackColor {{ background: {swatch_color}; "
+                f"border-radius: {radius}px; }} "
+                f"#TimelineTrackName {{ color: {colors.text_primary}; "
                 f"background: transparent; }} "
-                f"#TimelineTrackCollapse, #TimelineTrackEye, "
-                f"#TimelineTrackMute, #TimelineTrackSolo, "
-                f"#TimelineTrackLock {{ color: {colors.text_muted}; "
-                f"background: transparent; }}"
+                f"#TimelineTrackCollapse, "
+                f"#TimelineTrackMute, #TimelineTrackSolo "
+                f"{{ color: {colors.text_muted}; "
+                f"background: transparent; }} "
+                f"#TimelineTrackEye, #TimelineTrackLock "
+                f"{{ background: transparent; }}"
             )
 
-        # Playhead: a brighter neon-cyan line with a rounded top handle glow.
+        # Playhead: a brighter electric-blue line with a rounded handle glow.
         self._playhead_marker.setStyleSheet(
             f"#TimelinePlayhead {{ background: qlineargradient("
             f"x1:0, y1:0, x2:1, y2:0, "
-            f"stop:0 transparent, stop:0.5 {colors.accent_cyan}, "
+            f"stop:0 transparent, stop:0.5 {colors.accent_blue}, "
             f"stop:1 transparent); "
-            f"border: 1px solid {colors.accent_cyan_glow}; "
+            f"border: 1px solid {colors.accent_blue_glow}; "
             f"border-radius: {radius}px; }}"
         )
 
@@ -1096,15 +1426,60 @@ class Timeline(ThemedWidget):
                 f"border: 1px solid {colors.accent_cyan}; }}"
             )
 
-        # Clip cards: premium purple->blue gradient, translucent border,
-        # rounded, with a hover brighten and a selection glow (accent border +
-        # brighter fill) keyed on the existing `selected` dynamic property.
+        # Clip cards: category-colored gradients (video / overlay / text /
+        # fx / audio / voice) keyed on the `kind` dynamic property set in
+        # _rebuild_clips, with a hover brighten and a selection glow (accent
+        # border + cyan fill) keyed on the existing `selected` property.
+        def _clip_grad(color: str) -> str:
+            return (
+                f"qlineargradient(x1:0, y1:0, x2:0, y2:1, "
+                f"stop:0 {color}, stop:1 {colors.surface_overlay})"
+            )
+
+        kind_colors = {
+            "video": colors.track_video,
+            "overlay": colors.track_overlay,
+            "fx": colors.track_fx,
+        }
+        kind_rules = " ".join(
+            f'#TimelineClip[kind="{kind}"] {{ '
+            f"background: {_clip_grad(color)}; }}"
+            for kind, color in kind_colors.items()
+        )
+
+        # Audio-family clips read as dark waveform containers (the painted
+        # waveform provides the color); subtitle/text clips read as outlined
+        # dark chips with a colored caption, per the reference.
+        def _hex_rgba(color: str, alpha: float) -> str:
+            color = color.lstrip("#")
+            r, g, b = (int(color[i:i + 2], 16) for i in (0, 2, 4))
+            return f"rgba({r}, {g}, {b}, {alpha})"
+
+        audio_rules = " ".join(
+            f'#TimelineClip[kind="{kind}"] {{ '
+            f"background: {_hex_rgba(color, 0.14)}; "
+            f"border: 1px solid {_hex_rgba(color, 0.45)}; }} "
+            f'#TimelineClip[kind="{kind}"] #TimelineClipLabel {{ '
+            f"color: {color}; }}"
+            for kind, color in (
+                ("audio", colors.track_audio),
+                ("voice", colors.track_voice),
+            )
+        )
+        text_rules = (
+            f'#TimelineClip[kind="text"] {{ '
+            f"background: {_hex_rgba(colors.track_text, 0.12)}; "
+            f"border: 1px solid {_hex_rgba(colors.track_text, 0.55)}; }} "
+            f'#TimelineClip[kind="text"] #TimelineClipLabel {{ '
+            f"color: {colors.text_primary}; }}"
+        )
         clip_qss = (
             f"#TimelineClip {{ "
             f"background: qlineargradient(x1:0, y1:0, x2:0, y2:1, "
             f"stop:0 {colors.accent_purple}, stop:1 {colors.accent_blue}); "
             f"border: 1px solid {colors.glass_border}; "
             f"border-radius: {radius}px; }} "
+            f"{kind_rules} {audio_rules} {text_rules} "
             f"#TimelineClip:hover {{ "
             f"border: 1px solid {colors.glass_highlight}; }} "
             f'#TimelineClip[selected="true"] {{ '

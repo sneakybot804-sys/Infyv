@@ -67,11 +67,16 @@ def surface_card_qss(
 def glass_card_qss(
     colors: ColorsLike, *, radius: int, selector: str = "QFrame"
 ) -> str:
-    """Return QSS for a translucent glass card (fill + light border)."""
+    """Return QSS for a translucent glass card (fill + light border).
+
+    Depth pass (visual-only): the glass fill keeps its tinted translucency
+    while a lighter top border simulates the top sheen of frosted glass.
+    """
     return f"""
 {selector} {{
     background-color: {colors.glass_fill};
     border: 1px solid {colors.glass_border};
+    border-top: 1px solid {colors.glass_highlight};
     border-radius: {radius}px;
 }}
 """.strip()
@@ -225,7 +230,8 @@ def progress_chunk_qss(
     accent_c = accent_color(colors, accent)
     return f"""
 {selector} {{
-    background-color: {accent_c};
+    background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 {accent_c}, stop:1 {colors.accent_cyan});
     border-radius: {radius}px;
 }}
 """.strip()
@@ -492,6 +498,11 @@ def slider_qss(
     margin: {handle_margin}px 0;
     border-radius: {handle // 2}px;
 }}
+{selector}::handle:horizontal:hover {{
+    background-color: {colors.text_primary};
+    border: 2px solid {accent_c};
+    margin: {handle_margin - 1}px 0;
+}}
 {selector}:focus {{
     border: none;
 }}
@@ -587,8 +598,20 @@ def neon_button_qss(
     """
     accent_c = accent_color(colors, accent)
     if variant == "primary":
-        base_bg, base_fg, base_border = accent_c, colors.text_on_accent, accent_c
-        hover_bg = accent_c
+        # Premium gradient pill: the accent blends into purple on the right
+        # (the reference's blue→purple hero-button look), with a light top
+        # sheen border for a glassy, raised feel.
+        grad_end = getattr(colors, "accent_purple", colors.surface_overlay)
+        base_bg = (
+            f"qlineargradient(x1:0, y1:0, x2:1, y2:1, "
+            f"stop:0 {accent_c}, stop:1 {grad_end})"
+        )
+        base_fg, base_border = colors.text_on_accent, accent_c
+        hover_bg = (
+            f"qlineargradient(x1:0, y1:0, x2:1, y2:1, "
+            f"stop:0 {colors.glass_highlight}, stop:0.12 {accent_c}, "
+            f"stop:1 {grad_end})"
+        )
     elif variant == "secondary":
         base_bg, base_fg, base_border = colors.surface_elevated, colors.text_primary, colors.border
         hover_bg = colors.surface_overlay

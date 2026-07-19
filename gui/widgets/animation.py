@@ -4,8 +4,8 @@ These helpers are generic and widget-agnostic. They must not import token
 modules: callers (widgets, which hold the injected :class:`ThemeManager`)
 resolve concrete timing/easing from the active tokens and pass them in. Every
 helper accepts ``animated``; when ``False`` it applies the final state
-instantly (no running animation), which is also the accessibility \"reduce
-motion\" path.
+instantly (no running animation), which is also the accessibility "reduce
+motion" path.
 """
 from __future__ import annotations
 
@@ -14,9 +14,11 @@ from typing import Callable, Optional
 from PySide6.QtCore import (
     QAbstractAnimation,
     QEasingCurve,
+    QPoint,
     QPropertyAnimation,
     QVariantAnimation,
 )
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QGraphicsOpacityEffect, QWidget
 
 
@@ -137,3 +139,100 @@ def tween_value(
     animation.valueChanged.connect(lambda v: on_value(float(v)))
     animation.start(QAbstractAnimation.DeletionPolicy.DeleteWhenStopped)
     return animation
+
+
+def slide_in(
+    widget: QWidget,
+    direction: str,
+    distance_px: int,
+    *,
+    duration_ms: int,
+    easing: QEasingCurve,
+    animated: bool = True,
+    owner: Optional[QWidget] = None,
+) -> Optional[QPropertyAnimation]:
+    """Slide ``widget`` into its natural position from a directional offset.
+
+    The widget must already be at its final position in the layout; this
+    helper temporarily offsets its ``pos`` and animates it back to zero offset.
+    Intended for entrance animations (sidebar panels, dialog overlays).
+
+    Args:
+        widget: The widget to animate.
+        direction: One of ``"left"``, ``"right"``, ``"up"``, ``"down"``.
+        distance_px: How many pixels to offset from the natural position.
+        duration_ms: Duration in milliseconds.
+        easing: Easing curve.
+        animated: Reduce-motion path when ``False`` — widget stays at its
+            natural position.
+        owner: Optional parent for lifetime management.
+
+    Returns:
+        The running :class:`QPropertyAnimation`, or ``None``.
+    """
+    if not animated:
+        return None
+
+    natural = widget.pos()
+    offsets = {
+        "left":  QPoint(-distance_px, 0),
+        "right": QPoint(distance_px, 0),
+        "up":    QPoint(0, -distance_px),
+        "down":  QPoint(0, distance_px),
+    }
+    offset = offsets.get(direction, QPoint(-distance_px, 0))
+    start_pos = natural + offset
+
+    anim = QPropertyAnimation(widget, b"pos", owner or widget)
+    anim.setDuration(duration_ms)
+    anim.setStartValue(start_pos)
+    anim.setEndValue(natural)
+    anim.setEasingCurve(easing)
+    anim.start(QAbstractAnimation.DeletionPolicy.DeleteWhenStopped)
+    return anim
+
+
+def pulse_color(
+    widget: QWidget,
+    from_color: QColor,
+    to_color: QColor,
+    *,
+    duration_ms: int,
+    easing: QEasingCurve,
+    animated: bool = True,
+    on_color: Optional[Callable[[QColor], None]] = None,
+) -> Optional[QVariantAnimation]:
+    """Tween the foreground color of ``widget`` from ``from_color`` to ``to_color``.
+
+    The caller provides an ``on_color`` callback that applies the interpolated
+    color (e.g. via ``setStyleSheet``). When ``on_color`` is ``None`` a default
+    no-op callback is used and the caller is expected to read the color via the
+    returned animation's ``currentValue()``.
+
+    Args:
+        widget: Widget that owns the animation lifetime.
+        from_color: Starting ``QColor``.
+        to_color: Ending ``QColor``.
+        duration_ms: Duration in milliseconds.
+        easing: Easing curve.
+        animated: Reduce-motion path when ``False``.
+        on_color: Optional callback receiving the current ``QColor`` each frame.
+
+    Returns:
+        The running :class:`QVariantAnimation`, or ``None``.
+    """
+    if on_color is None:
+        on_color = lambda _c: None  # noqa: E731
+
+    if not animated:
+        on_color(to_color)
+        return None
+
+    anim = QVariantAnimation(widget)
+    anim.setStartValue(from_color)
+    anim.setEndValue(to_color)
+    anim.setDuration(duration_ms)
+    anim.setEasingCurve(easing)
+    anim.valueChanged.connect(lambda v: on_color(v))
+    anim.start(QAbstractAnimation.DeletionPolicy.DeleteWhenStopped)
+    return anim
