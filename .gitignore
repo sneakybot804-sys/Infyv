@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.pyo
+output/
+logs/
+videos/
+*.avi
+*.mp4
+*.mov
+*.mkv
+.pytest_cache/
+.pytest_tmp*/
+benchmark_results.*
+*.vsix
+FETCH_HEAD
