@@ -1510,9 +1510,28 @@ class Timeline(ThemedWidget):
         # waveform provides the color); subtitle/text clips read as outlined
         # dark chips with a colored caption, per the reference.
         def _hex_rgba(color: str, alpha: float) -> str:
-            color = color.lstrip("#")
-            r, g, b = (int(color[i:i + 2], 16) for i in (0, 2, 4))
-            return f"rgba({r}, {g}, {b}, {alpha})"
+            """Return ``rgba(r, g, b, alpha)`` from a hex or rgb(a) token.
+
+            Accepts '#rgb', '#rrggbb', 'rgb(r,g,b)' and 'rgba(r,g,b,a)'
+            defensively so a non-hex color token never raises inside the
+            theme/paint path (which previously produced invalid-color
+            warnings). Falls back to an opaque-ish neutral on any parse
+            failure rather than crashing.
+            """
+            try:
+                text = color.strip()
+                if text.lower().startswith(("rgba(", "rgb(")):
+                    inner = text[text.index("(") + 1:text.rindex(")")]
+                    parts = [p.strip() for p in inner.split(",")]
+                    r, g, b = (int(round(float(parts[i]))) for i in range(3))
+                    return f"rgba({r}, {g}, {b}, {alpha})"
+                hexstr = text.lstrip("#")
+                if len(hexstr) == 3:  # '#rgb' shorthand
+                    hexstr = "".join(ch * 2 for ch in hexstr)
+                r, g, b = (int(hexstr[i:i + 2], 16) for i in (0, 2, 4))
+                return f"rgba({r}, {g}, {b}, {alpha})"
+            except Exception:
+                return f"rgba(128, 128, 128, {alpha})"
 
         audio_rules = " ".join(
             f'#TimelineClip[kind="{kind}"] {{ '
