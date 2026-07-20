@@ -3059,16 +3059,45 @@ class _MediaWorkspace(QWidget):
         The timeline stays the single playback clock: its set_playhead emits
         playhead_changed which decodes+displays the frame and (via
         _on_playhead_changed -> transport.set_position) keeps the scrubber in
-        sync without re-emitting seek_requested (no loop). A seek during
-        playback re-anchors the streaming decoder at the new position.
+        sync without re-emitting seek_requested (no loop).
+
+        The playhead moves immediately for a responsive scrub, but the
+        streaming decoder's re-anchor (which respawns the ffmpeg process) is
+        DEBOUNCED: a fast drag emits many intermediate positions, and
+        respawning the pipe for each one is the laggy-scrub cause. Only the
+        settled position (after ~80ms of quiet) actually re-anchors the
+        decoder, collapsing a whole drag into a single respawn.
         """
         duration = self._timeline.duration()
         target = max(0.0, min(1.0, fraction)) * duration
-        if self._decoder is not None:
-            self._decoder.seek(target)
-            self._decoder_start = target
-            self._decoder_frames_shown = 0
+        # Immediate, cheap: keep the clock/playhead/timecode responsive.
         self._timeline.set_playhead(target)
+        # Deferred, expensive: only re-anchor the streaming decoder once the
+        # scrubber settles (avoids per-tick ffmpeg respawns).
+        if self._decoder is not None:
+            self._pending_seek_target = target
+            self._ensure_seek_debounce_timer()
+            self._seek_debounce_timer.start()
+
+    def _ensure_seek_debounce_timer(self) -> None:
+        """Lazily create the single-shot decoder-reanchor debounce timer."""
+        timer = getattr(self, "_seek_debounce_timer", None)
+        if timer is None:
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.setInterval(80)
+            timer.timeout.connect(self._commit_pending_seek)
+            self._seek_debounce_timer = timer
+
+    def _commit_pending_seek(self) -> None:
+        """Re-anchor the streaming decoder at the settled scrub position."""
+        target = getattr(self, "_pending_seek_target", None)
+        if target is None or self._decoder is None:
+            return
+        self._pending_seek_target = None
+        self._decoder.seek(target)
+        self._decoder_start = target
+        self._decoder_frames_shown = 0
 
     def _on_playback_finished(self) -> None:
         """Loop playback when the loop toggle is active."""
