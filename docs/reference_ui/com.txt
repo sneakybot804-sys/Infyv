@@ -1,0 +1,6 @@
+cd D:\aviveera795-project\aviveera795-project
+
+python -B -m gui.workspace_preview
+
+
+venv\Scripts\activate

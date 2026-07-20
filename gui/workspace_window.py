@@ -60,6 +60,10 @@ class _FramelessWorkspaceWindow(QMainWindow):
     embedded widgets; this subclass only removes the OS frame and restores
     native resize behavior on Windows via ``WM_NCHITTEST``. It adds no
     application behavior.
+
+    Drag & drop: the window accepts video-file drops anywhere (including
+    over the toolbar/title chrome) and forwards them to the central
+    screen's existing drop handlers.
     """
 
     def __init__(self) -> None:
@@ -71,6 +75,23 @@ class _FramelessWorkspaceWindow(QMainWindow):
             | Qt.WindowType.WindowMinimizeButtonHint
             | Qt.WindowType.WindowMaximizeButtonHint
         )
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        """Forward drag-enter to the central screen's handler."""
+        central = self.centralWidget()
+        if central is not None and hasattr(central, "dragEnterEvent"):
+            central.dragEnterEvent(event)
+        else:
+            super().dragEnterEvent(event)
+
+    def dropEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        """Forward drops to the central screen's handler."""
+        central = self.centralWidget()
+        if central is not None and hasattr(central, "dropEvent"):
+            central.dropEvent(event)
+        else:
+            super().dropEvent(event)
 
     def nativeEvent(self, event_type, message):  # noqa: N802 (Qt override)
         """Map cursor position to resize edges so the frameless window resizes.
@@ -311,7 +332,7 @@ def build_workspace_window(theme: ThemeManager, controller=None) -> QMainWindow:
     status = window.statusBar()
     status.setSizeGripEnabled(True)
     status.showMessage("Ready")
-    _populate_status_bar(status, colors, tokens)
+    _populate_status_bar(status, colors, tokens, window=window)
 
     # Premium shell chrome: a window-level, object-name-scoped, token-derived
     # QSS block layered on top of the global theme QSS.
@@ -448,7 +469,7 @@ def _populate_main_toolbar(
     toolbar.addWidget(export)
 
 
-def _populate_status_bar(status, colors, tokens) -> None:
+def _populate_status_bar(status, colors, tokens, window=None) -> None:
     """Add the premium right-aligned status readouts (permanent widgets)."""
     def _chip(text: str, *, accent: str | None = None) -> QLabel:
         label = QLabel(text)
@@ -460,18 +481,102 @@ def _populate_status_bar(status, colors, tokens) -> None:
         )
         return label
 
-    status.addPermanentWidget(_chip("Project: Valorant Montage"))
-    status.addPermanentWidget(_chip("Timeline: Main Edit"))
-    status.addPermanentWidget(_chip("00:02:18:09  total duration"))
-    status.addPermanentWidget(_chip("Saved 2 minutes ago", accent=colors.success))
-    status.addPermanentWidget(_chip("NVIDIA RTX 4070 Ti"))
-    status.addPermanentWidget(_chip("VRAM 9.2 / 12 GB"))
+    project_chip = _chip("Project: \u2014")
+    status.addPermanentWidget(project_chip)
+    timeline_chip = _chip("Timeline: \u2014")
+    status.addPermanentWidget(timeline_chip)
+    duration_chip = _chip("Duration: \u2014")
+    status.addPermanentWidget(duration_chip)
+    saved_chip = _chip("Saved: never", accent=colors.success)
+    status.addPermanentWidget(saved_chip)
+    gpu_chip = _chip("GPU: detecting\u2026")
+    status.addPermanentWidget(gpu_chip)
+    vram_chip = _chip("VRAM: \u2014")
+    status.addPermanentWidget(vram_chip)
     dot = QLabel("\u25cf")
     dot.setStyleSheet(
         f"color: {colors.success}; background: transparent; "
         f"padding-right: {tokens.spacing.md}px; font-size: 10px;"
     )
     status.addPermanentWidget(dot)
+    # Live-update timer for system metrics.
+    from PySide6.QtCore import QTimer
+    def _update():
+        try:
+            import psutil
+            total_gb = psutil.virtual_memory().total / (1024**3)
+            vram_chip.setText(f"RAM: {psutil.virtual_memory().used/1024**3:.1f}/{total_gb:.1f} GB")
+        except Exception:
+            pass
+        try:
+            import subprocess
+            out = subprocess.check_output(
+                ["nvidia-smi", "--query-gpu=name,memory.used,memory.total",
+                 "--format=csv,noheader,nounits"],
+                timeout=2, stderr=subprocess.DEVNULL,
+            ).decode(errors="replace").strip()
+            parts = [p.strip() for p in out.split(",")]
+            if len(parts) >= 3:
+                gpu_chip.setText(f"GPU: {parts[0]}")
+                vram_chip.setText(f"VRAM: {parts[1]}/{parts[2]} MB")
+        except Exception:
+            # Non-NVIDIA (or no nvidia-smi): resolve the adapter name once
+            # via Windows WMI so Intel/AMD GPUs still show their real name.
+            if not hasattr(_update, "_wmi_gpu"):
+                _update._wmi_gpu = ""
+                try:
+                    out = subprocess.check_output(
+                        ["powershell", "-NoProfile", "-Command",
+                         "(Get-CimInstance Win32_VideoController).Name"],
+                        timeout=5, stderr=subprocess.DEVNULL,
+                    )
+                    lines = [
+                        line.strip() for line in
+                        out.decode(errors="replace").splitlines()
+                        if line.strip()
+                    ]
+                    vendors = ("nvidia", "amd", "radeon", "intel",
+                               "geforce", "arc")
+                    real = [
+                        l for l in lines
+                        if any(v in l.lower() for v in vendors)
+                    ]
+                    if real:
+                        _update._wmi_gpu = real[0]
+                    elif lines:
+                        _update._wmi_gpu = lines[0]
+                except Exception:
+                    pass
+            gpu_chip.setText(
+                f"GPU: {_update._wmi_gpu}" if _update._wmi_gpu
+                else "GPU: none detected"
+            )
+        # Real project / timeline / save state from the central screen.
+        central = window.centralWidget() if window is not None else None
+        if central is not None:
+            path = getattr(central, "_project_path", None)
+            project_chip.setText(
+                f"Project: {path.stem}" if path is not None
+                else "Project: unsaved"
+            )
+            media = getattr(central, "_media_path", None)
+            timeline_chip.setText(
+                f"Media: {media.name}" if media is not None
+                else "Media: none"
+            )
+            timeline = getattr(central, "_timeline", None)
+            if timeline is not None:
+                total = int(timeline.duration())
+                duration_chip.setText(
+                    f"Duration: {total // 60:02d}:{total % 60:02d}"
+                )
+            if path is not None:
+                saved_chip.setText("Saved ✓")
+    _update()
+    timer = QTimer(status)
+    timer.setInterval(2000)
+    timer.timeout.connect(_update)
+    timer.start()
 
 
 def main() -> int:

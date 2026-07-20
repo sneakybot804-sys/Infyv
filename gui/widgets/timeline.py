@@ -178,6 +178,11 @@ class Timeline(ThemedWidget):
         self._zoom_max = 4.0
         self._zoom_step = 1.25
         self._clip_base_width = self.scaled(self.tokens.spacing.xxl)
+        # Optional callbacks for real media data (set by the hosting screen).
+        # thumbnail_fn(source_path, seconds) -> QImage | None
+        self._thumbnail_fn = None
+        # waveform_fn(source_path, start_s, end_s, num_samples) -> list[float]
+        self._waveform_fn = None
         # Playback state (Milestone 9). Timer-driven transport that advances
         # the existing playhead; no real media. _playback_state is one of
         # 'stopped' / 'playing' / 'paused'. The single-owner QTimer ticks at
@@ -186,9 +191,15 @@ class Timeline(ThemedWidget):
         # playhead_changed). Reaching the duration stops and emits
         # playback_finished.
         self._playback_state = "stopped"
-        self._play_interval_ms = 33
+        # 16ms precise ticks (~60Hz polling). The playhead advances by REAL
+        # elapsed wall time per tick (see _on_play_tick), and the hosting
+        # screen paces frame display to the media fps — a faster tick only
+        # tightens display latency, it never speeds up playback. Qt's default
+        # CoarseTimer has 5% slop which starved 30fps display down to ~21fps.
+        self._play_interval_ms = 16
         self._play_timer = QTimer(self)
         self._play_timer.setInterval(self._play_interval_ms)
+        self._play_timer.setTimerType(Qt.TimerType.PreciseTimer)
         self._play_timer.timeout.connect(self._on_play_tick)
         # Receive keyboard shortcuts (Space / Home / End).
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -309,6 +320,11 @@ class Timeline(ThemedWidget):
         if self._playback_state == "playing":
             return
         self._set_playback_state("playing")
+        # Wall-clock anchor: ticks advance by REAL elapsed time (not the
+        # nominal timer interval), so late timer firings never make the
+        # playhead lag behind real time (keeps audio/video in sync).
+        import time as _time
+        self._last_tick_at = _time.monotonic()
         self._play_timer.start()
 
     def pause(self) -> None:
@@ -357,8 +373,15 @@ class Timeline(ThemedWidget):
         self._sync_playhead_pulse()
 
     def _on_play_tick(self) -> None:
-        """Advance the playhead one timer interval; stop at the end."""
-        step = (self._play_interval_ms / 1000.0) * self.playback_rate()
+        """Advance the playhead by real elapsed wall time; stop at the end."""
+        import time as _time
+        now = _time.monotonic()
+        elapsed = now - getattr(self, "_last_tick_at", now)
+        self._last_tick_at = now
+        # Clamp pathological gaps (system sleep etc.) to one nominal interval.
+        if elapsed <= 0 or elapsed > 1.0:
+            elapsed = self._play_interval_ms / 1000.0
+        step = elapsed * self.playback_rate()
         target = self._playhead + step
         if target >= self._duration:
             self.set_playhead(self._duration)
@@ -795,6 +818,14 @@ class Timeline(ThemedWidget):
         self._rebuild_clips()
         self.clip_trimmed.emit(index, new_start, new_length)
 
+    def set_thumbnail_fn(self, fn):
+        """Set a callback ``(source_path, seconds) -> QImage | None``."""
+        self._thumbnail_fn = fn
+
+    def set_waveform_fn(self, fn):
+        """Set a callback ``(source, start_s, end_s, n) -> list[float]``."""
+        self._waveform_fn = fn
+
     def is_dragging(self) -> bool:
         """Return ``True`` while a clip drag is in progress (read-only)."""
         return self._drag_active
@@ -913,14 +944,42 @@ class Timeline(ThemedWidget):
             block_layout.setContentsMargins(
                 self.tokens.spacing.xs, 0, self.tokens.spacing.xs, 0
             )
+            block_layout.setSpacing(self.tokens.spacing.xxs)
+            # Real video thumbnail: decode a frame at the clip's start time
+            # and show it as a scaled background image on the clip block.
+            source = clip.get("source", "") or label_text
+            if source and self._thumbnail_fn is not None:
+                clip_start = float(clip.get("start", 0.0))
+                thumb_key = (source, int(clip_start * 10))
+                if not hasattr(self, "_thumb_cache"):
+                    self._thumb_cache = {}
+                thumb = self._thumb_cache.get(thumb_key)
+                if thumb is None:
+                    try:
+                        thumb = self._thumbnail_fn(source, clip_start)
+                    except Exception:
+                        thumb = None
+                    self._thumb_cache[thumb_key] = thumb
+                if thumb is not None:
+                    thumb_lbl = QLabel(block)
+                    length_s = max(1.0, float(clip.get("length", 1.0)))
+                    length_factor = max(1.0, length_s / 4.0)
+                    block_w = int(self._clip_base_width * self._zoom * length_factor)
+                    from PySide6.QtGui import QPixmap as _QP
+                    thumb_lbl.setPixmap(
+                        _QP.fromImage(thumb).scaled(
+                            max(1, block_w - 4), 28,
+                            Qt.AspectRatioMode.KeepAspectRatio,
+                            Qt.TransformationMode.SmoothTransformation,
+                        )
+                    )
+                    thumb_lbl.setStyleSheet(
+                        "background: transparent; border-radius: 2px;"
+                    )
+                    block_layout.addWidget(thumb_lbl, 0)
             caption = QLabel(label_text, block)
             caption.setObjectName("TimelineClipLabel")
             caption.setFont(self._theme.font("caption"))
-            # Clips are duration-proportional, so a long filename can exceed
-            # the block width. Elide with "…" against the block's computed
-            # width (visual only — the full name stays in the model and the
-            # tooltip) so text never hard-clips mid-glyph. The width formula
-            # below mirrors the setMinimumWidth call further down.
             caption.setToolTip(label_text)
             length_s = max(1.0, float(clip.get("length", 1.0)))
             length_factor = max(1.0, length_s / 4.0)
@@ -931,7 +990,7 @@ class Timeline(ThemedWidget):
                 caption.setText(
                     fm.elidedText(label_text, Qt.TextElideMode.ElideRight, avail)
                 )
-            block_layout.addWidget(caption)
+            block_layout.addWidget(caption, 1)
             # Audio-family clips get a decorative painted pseudo-waveform
             # (visual-only; mouse-transparent so select / drag / trim on the
             # clip frame is unaffected).

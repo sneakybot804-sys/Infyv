@@ -28,11 +28,22 @@ The only public entry point is :func:`build_media_workspace_screen`.
 """
 from __future__ import annotations
 
+import collections
 from typing import List, Optional
 
-from PySide6.QtCore import QAbstractAnimation, QPropertyAnimation, Qt, QTimer
+from PySide6.QtCore import (
+    QAbstractAnimation,
+    QMutex,
+    QMutexLocker,
+    QPropertyAnimation,
+    QThread,
+    QTimer,
+    Qt,
+    Signal,
+)
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
+    QApplication,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -66,6 +77,134 @@ _DEMO_ITEMS: List[str] = [
     "clip_02.mp4",
     "highlight_reel.mp4",
 ]
+
+
+class _FrameDecoder(QThread):
+    """Background video frame decoder using ONE persistent ffmpeg pipe.
+
+    Spawns a single long-lived ffmpeg process streaming raw BGR frames
+    sequentially (no per-frame subprocess, no per-frame seek), buffering up
+    to ``max_frames`` ndarrays. The main thread pulls frames from the deque
+    on each play tick — real-time playback at the video's native frame rate.
+
+    Signals:
+        error(str): Emitted when decoding fails (GUI thread via queued conn).
+    """
+
+    error = Signal(str)
+
+    def __init__(self, controller, media_path, fps: float = 30.0,
+                 max_frames: int = 8, start_at: float = 0.0, parent=None):
+        super().__init__(parent)
+        self._controller = controller
+        self._media_path = media_path
+        self._fps = max(1.0, float(fps))
+        self._max_frames = max(2, int(max_frames))
+        self._queue: collections.deque = collections.deque(maxlen=self._max_frames)
+        self._mutex = QMutex()
+        self._stop = False
+        self._start_at = max(0.0, float(start_at))
+        self._seek_to: Optional[float] = None
+        self._proc = None
+
+    def run(self):
+        """Stream frames from one persistent ffmpeg pipe until stopped."""
+        import subprocess
+
+        import numpy as np
+
+        # Probe once for dimensions (backend metadata; no per-frame probe).
+        try:
+            meta = self._controller.media_metadata(self._media_path)
+            width = int(getattr(meta, "width", 0) or 0)
+            height = int(getattr(meta, "height", 0) or 0)
+        except Exception as exc:
+            self.error.emit(f"metadata failed: {exc}")
+            return
+        if width <= 0 or height <= 0:
+            self.error.emit("invalid video dimensions")
+            return
+        frame_bytes = width * height * 3
+        start = self._start_at
+
+        while not self._stop:
+            # (Re)spawn the streaming pipe at `start` seconds.
+            cmd = [
+                "ffmpeg", "-nostdin", "-loglevel", "error",
+                "-ss", f"{start:.3f}",
+                "-i", str(self._media_path),
+                "-f", "rawvideo", "-pix_fmt", "bgr24",
+                "pipe:1",
+            ]
+            try:
+                self._proc = subprocess.Popen(
+                    cmd, stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    bufsize=frame_bytes * 4,
+                )
+            except Exception as exc:
+                self.error.emit(f"ffmpeg spawn failed: {exc}")
+                return
+
+            restart = False
+            while not self._stop:
+                # Seek request: kill the pipe and respawn at the new time.
+                with QMutexLocker(self._mutex):
+                    if self._seek_to is not None:
+                        start = self._seek_to
+                        self._seek_to = None
+                        self._queue.clear()
+                        restart = True
+                # Back-pressure: wait while the buffer is full.
+                if not restart and len(self._queue) >= self._max_frames:
+                    self.msleep(5)
+                    continue
+                if restart:
+                    break
+                raw = self._proc.stdout.read(frame_bytes)
+                if not raw or len(raw) < frame_bytes:
+                    # End of stream.
+                    self._stop = True
+                    break
+                frame = np.frombuffer(raw, dtype=np.uint8).reshape(
+                    (height, width, 3)
+                ).copy()
+                with QMutexLocker(self._mutex):
+                    self._queue.append(frame)
+
+            self._kill_proc()
+            if not restart:
+                break
+
+    def _kill_proc(self):
+        proc = self._proc
+        self._proc = None
+        if proc is not None:
+            try:
+                proc.kill()
+                proc.wait(timeout=2)
+            except Exception:
+                pass
+
+    # -- Thread-safe API (called from GUI thread) --
+    def seek(self, seconds: float):
+        with QMutexLocker(self._mutex):
+            self._seek_to = float(seconds)
+
+    def precache(self, seconds: float):
+        self.seek(seconds)
+
+    def pop(self):
+        with QMutexLocker(self._mutex):
+            return self._queue.popleft() if self._queue else None
+
+    def clear(self):
+        with QMutexLocker(self._mutex):
+            self._queue.clear()
+
+    def stop_decoding(self):
+        self._stop = True
+        self._kill_proc()
 
 
 class _MediaWorkspace(QWidget):
@@ -322,6 +461,38 @@ class _MediaWorkspace(QWidget):
         # recent rows open the matching saved project when one exists (looked
         # up by row name against the persisted recents index).
         self._wire_sidebar_projects()
+        # Sidebar navigation: show the MediaBrowser when "Media" is active
+        # (index 2), hide it for any other nav item. The browser is always
+        # a child of the screen (not in the splitter), so hiding/showing it
+        # never corrupts splitter geometry.
+        self._sidebar.navigation_changed.connect(self._on_nav_changed)
+        self._nav_media_index = 2  # "Media" in _NAV_ITEMS
+        # AI orchestration: build the AIManager + AIController (ai_core
+        # pipeline). Failure-tolerant — without keys/network the controller
+        # still constructs; individual requests then report their errors
+        # through request_failed.
+        self._ai_controller = None
+        if controller is not None:
+            try:
+                from ai_core import AIManager
+                from gui.integration.ai_controller import AIController
+
+                manager = AIManager(
+                    controller=controller,
+                    view_state=self._ai_view_state,
+                )
+                self._ai_controller = AIController(manager, parent=self)
+                self._ai_controller.request_started.connect(
+                    self._on_ai_request_started
+                )
+                self._ai_controller.request_completed.connect(
+                    self._on_ai_request_completed
+                )
+                self._ai_controller.request_failed.connect(
+                    self._on_ai_request_failed
+                )
+            except Exception:
+                self._ai_controller = None
 
     # ------------------------------------------------------------------ #
     # Region builders
@@ -558,8 +729,11 @@ class _MediaWorkspace(QWidget):
             play_tile, 0, Qt.AlignmentFlag.AlignHCenter
         )
         # Kept as an attribute so show_frame()/clear_frame() can hide the
-        # decorative tile while a real decoded frame is displayed.
+        # decorative tile while a real decoded frame is displayed. Clicking
+        # it selects the first media item (if none selected) and starts
+        # playback — the empty-state play button behaves like a play button.
         self._preview_play_tile = play_tile
+        self._register_click(play_tile, self._on_play_tile_clicked)
         stage_layout.addSpacing(tokens.spacing.sm)
         placeholder = QLabel("No clip selected", stage)
         placeholder.setObjectName("MediaWorkspacePreviewPlaceholder")
@@ -1553,7 +1727,8 @@ class _MediaWorkspace(QWidget):
         header.set_divider(True)
         inner.addWidget(header)
 
-        # Prompt input + Ask affordance (placeholders; wired to nothing).
+        # Prompt input + Ask button: wired to the AIController (ai_core
+        # pipeline) when one is available; reports honestly otherwise.
         self._ai_prompt = TextField(
             self._theme, placeholder="Ask the AI to edit\u2026"
         )
@@ -1561,6 +1736,8 @@ class _MediaWorkspace(QWidget):
         inner.addWidget(self._ai_prompt)
         ask = NeonButton(self._theme, "Ask AI", variant="primary", accent="purple")
         ask.setObjectName("MediaWorkspaceAiAsk")
+        ask.clicked.connect(self._on_ai_ask)
+        self._ai_prompt.return_pressed.connect(self._on_ai_ask)
         inner.addWidget(ask)
 
         # Suggested Actions grid of ghost buttons (decorative).
@@ -1577,6 +1754,20 @@ class _MediaWorkspace(QWidget):
             "Clean Audio", "Create Thumbnail", "Smart Crop",
             "Remove Silence", "Enhance Voice", "Color Grade",
         )
+        # Suggested-action -> real behavior. Phase actions run the backend
+        # pipeline; AI-text actions go through the AIController; unmapped
+        # actions report honestly on click.
+        action_slots = {
+            "Auto Edit": self.start_auto_edit,
+            "Generate Highlights": lambda: self._run_ai_tool(
+                "Generate Highlights", "highlight"),
+            "Generate Captions": lambda: self._run_ai_tool(
+                "Generate Captions", "subtitles"),
+            "Clean Audio": lambda: self._run_ai_tool(
+                "Clean Audio", "audio"),
+            "Create Thumbnail": lambda: self._submit_ai(
+                "generate_thumbnail", "Create a thumbnail brief for this video"),
+        }
         pair_row = None
         for index, label in enumerate(action_labels):
             if index % 2 == 0:
@@ -1586,6 +1777,15 @@ class _MediaWorkspace(QWidget):
                 actions_grid.addLayout(pair_row)
             btn = NeonButton(self._theme, label, variant="ghost", accent="cyan")
             btn.setObjectName("MediaWorkspaceAiAction")
+            slot = action_slots.get(label)
+            if slot is not None:
+                btn.clicked.connect(lambda _=False, s=slot: s())
+            else:
+                btn.clicked.connect(
+                    lambda _=False, l=label: self._detail_status.set_text(
+                        f"{l}: no backend capability yet"
+                    )
+                )
             pair_row.addWidget(btn)
         inner.addWidget(actions_wrap)
 
@@ -1696,6 +1896,8 @@ class _MediaWorkspace(QWidget):
         # Clips 0-2 are the frozen demo clips (identical values); the rest
         # are appended decorative chips that dress the new lanes like the
         # reference gaming-montage timeline (visual-only, append-only).
+        # Wire real thumbnail decoding for video clips in the timeline.
+        self._timeline.set_thumbnail_fn(self._decode_timeline_thumbnail)
         self._timeline.set_clips(
             [
                 {"track": 0, "start": 0.0, "length": 12.0, "label": "Intro"},
@@ -1974,34 +2176,75 @@ class _MediaWorkspace(QWidget):
             height, width = int(bgr.shape[0]), int(bgr.shape[1])
             if height <= 0 or width <= 0:
                 return
-            rgb = bgr[:, :, ::-1]  # BGR -> RGB
-            buffer = rgb.tobytes()
-            image = QImage(buffer, width, height, 3 * width, QImage.Format.Format_RGB888)
-            # Copy so the QImage does not alias the temporary buffer.
-            pixmap = QPixmap.fromImage(image.copy())
+            # BGR888 avoids the per-frame numpy channel reversal (a full
+            # 2.7MB copy at 720p) — Qt swizzles during the scale instead.
+            # `buf` must outlive the QImage until scaled() deep-copies.
+            buf = bgr.tobytes()
+            image = QImage(buf, width, height, 3 * width,
+                           QImage.Format.Format_BGR888)
         except Exception:
             return
-        target = self._preview_frame.size()
         zoom_text = getattr(self, "_preview_zoom", "Fit")
-        if zoom_text != "Fit" and zoom_text.endswith("%"):
+        # Determine the target size for scaling.  Use the frame size
+        # if it's been laid out, otherwise fall back to the stage size.
+        target = self._preview_frame.size()
+        if target.width() <= 100 or target.height() <= 100:
+            stage = self._preview_frame.parentWidget()
+            if stage is not None:
+                target = stage.size()
+        # Scaling mode: smooth for stills (seek/pause), fast during
+        # playback — smooth scaling of HD frames on the GUI thread costs
+        # more than a frame interval and drops the display rate.
+        mode = (
+            Qt.TransformationMode.FastTransformation
+            if self._timeline.is_playing()
+            else Qt.TransformationMode.SmoothTransformation
+        )
+        if zoom_text == "Fill" and target.width() > 0 and target.height() > 0:
+            # Fill: scale to cover, then crop center (filmic look).
+            sx = target.width() / max(1, width)
+            sy = target.height() / max(1, height)
+            s = max(sx, sy)
+            sw = int(width * s)
+            sh = int(height * s)
+            image = image.scaled(sw, sh,
+                                 Qt.AspectRatioMode.KeepAspectRatio,
+                                 mode)
+            # Center-crop to target
+            cx = (sw - target.width()) // 2
+            cy = (sh - target.height()) // 2
+            image = image.copy(cx, cy, target.width(), target.height())
+        elif zoom_text != "Fit" and zoom_text.endswith("%"):
             try:
-                scale = float(zoom_text.rstrip("%")) / 100.0
-                pixmap = pixmap.scaled(
-                    int(pixmap.width() * scale),
-                    int(pixmap.height() * scale),
+                s = float(zoom_text.rstrip("%")) / 100.0
+                image = image.scaled(
+                    int(width * s), int(height * s),
                     Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation,
+                    mode,
                 )
             except ValueError:
                 pass
         elif target.width() > 0 and target.height() > 0:
-            pixmap = pixmap.scaled(
+            image = image.scaled(
                 target,
                 Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
+                mode,
             )
+        pixmap = QPixmap.fromImage(image)
+        # Hide the empty-state chrome so the preview frame fills the stage.
         self._preview_placeholder.setVisible(False)
         self._preview_play_tile.setVisible(False)
+        hint = self.findChild(QLabel, "MediaWorkspacePreviewHint")
+        if hint is not None:
+            hint.setVisible(False)
+        safe = self.findChild(QFrame, "MediaWorkspacePreviewSafeArea")
+        if safe is not None:
+            safe.setVisible(False)
+        # Force the QLabel to the stage size so scaling targets the full
+        # viewport (prevents the label from shrinking to the pixmap size).
+        stage = self._preview_frame.parentWidget()
+        if stage is not None:
+            self._preview_frame.resize(stage.size())
         self._preview_frame.setPixmap(pixmap)
         self._preview_frame.setVisible(True)
 
@@ -2009,8 +2252,28 @@ class _MediaWorkspace(QWidget):
         """Hide the frame sink and restore the empty-state placeholder."""
         self._preview_frame.clear()
         self._preview_frame.setVisible(False)
-        self._preview_placeholder.setVisible(True)
-        self._preview_play_tile.setVisible(True)
+        hint = self.findChild(QLabel, "MediaWorkspacePreviewHint")
+        if hint is not None:
+            hint.setVisible(True)
+        safe = self.findChild(QFrame, "MediaWorkspacePreviewSafeArea")
+        if safe is not None:
+            safe.setVisible(True)
+
+    def _decode_timeline_thumbnail(self, source_path: str, seconds: float):
+        """Decode a single frame for a timeline clip thumbnail (returns QImage)."""
+        if self._controller is None:
+            return None
+        try:
+            resolved = self._resolve_media_path(source_path)
+            frame = self._controller.decode_frame(resolved, seconds)
+            if frame is None:
+                return None
+            h, w = frame.shape[:2]
+            rgb = frame[:, :, ::-1].copy()
+            return QImage(rgb.tobytes(), w, h, 3 * w,
+                          QImage.Format.Format_RGB888).copy()
+        except Exception:
+            return None
 
     # ------------------------------------------------------------------ #
     # Audio playback (Qt Multimedia; synchronized to the timeline playhead)
@@ -2079,14 +2342,19 @@ class _MediaWorkspace(QWidget):
         self._audio_player.setPosition(int(max(0.0, fraction) * duration * 1000))
 
     def _invalidate_frame_cache(self) -> None:
-        """Drop cached preview pixmaps (zoom or media changed)."""
+        """Drop cached preview pixmaps AND timeline thumbnails."""
         cache = getattr(self, "_frame_cache", None)
         if cache is not None:
             cache.clear()
         self._frame_on_screen = None
+        # Also clear timeline thumbnail cache so new media gets fresh thumbs.
+        thumb_cache = getattr(self._timeline, "_thumb_cache", None)
+        if thumb_cache is not None:
+            thumb_cache.clear()
 
     def _reset_audio_for_new_media(self) -> None:
-        """Stop audio and invalidate cached track/frames for a new selection."""
+        """Stop audio and background decoder, invalidate caches for a new selection."""
+        self._stop_decoder()
         if self._audio_player is not None:
             self._audio_player.stop()
         self._audio_loaded_for = None
@@ -2164,14 +2432,41 @@ class _MediaWorkspace(QWidget):
         self._media_path = video_path
         self._reset_audio_for_new_media()
         # Real media duration -> the single playback clock (Timeline widget),
-        # via the backend's existing metadata service. Only applied when no
-        # backend timeline exists (a backend timeline's duration wins below in
-        # _reflect_timeline; both use the widget's public set_duration).
+        # via the backend's existing metadata service. A fresh baseline
+        # (single media-spanning clip) is written when there is no backend
+        # timeline yet OR when the previous timeline was an auto-created,
+        # never-edited baseline for a DIFFERENT media file (switching media
+        # must not keep the old duration). A user-edited timeline is never
+        # discarded.
         try:
             meta = self._controller.media_metadata(video_path)
             duration = float(getattr(meta, "duration", 0.0) or 0.0)
-            if duration > 0 and self._controller.timeline() is None:
+            existing = self._controller.timeline()
+            baseline_for = getattr(self, "_baseline_media", None)
+            replaceable = (
+                existing is None
+                or (
+                    baseline_for is not None
+                    and baseline_for != str(video_path)
+                    and not getattr(self, "_timeline_user_edited", False)
+                )
+            )
+            if duration > 0 and replaceable:
                 self._timeline.set_duration(duration)
+                # Replace demo clips with a single media-spanning clip.
+                self._timeline.set_clips([
+                    {
+                        "track": 0,
+                        "start": 0.0,
+                        "length": duration,
+                        "label": display,
+                    }
+                ])
+                self._timeline.select_clip(-1)
+                self._persist_timeline_to_backend(record_history=False)
+                self._last_clips_snapshot = self._timeline.clips()
+                self._baseline_media = str(video_path)
+                self._timeline_user_edited = False
         except Exception:
             pass
         self._decode_and_show(0.0)
@@ -2399,6 +2694,18 @@ class _MediaWorkspace(QWidget):
         job = RenderJob(id=job_id, source=stem).mark_running()
         self._render_queue = self._render_queue.enqueue(job)
         self._active_render_job = job_id
+        # Real elapsed-time tracking: the backend PhaseRunner reports no
+        # fractional progress, so the row shows REAL elapsed seconds (and an
+        # elapsed-based estimate against media duration) instead of a fake
+        # frozen percentage. Ticks once per second while running.
+        import time as _time
+
+        self._render_started_at = _time.monotonic()
+        if not hasattr(self, "_render_tick_timer"):
+            self._render_tick_timer = QTimer(self)
+            self._render_tick_timer.setInterval(1000)
+            self._render_tick_timer.timeout.connect(self._reflect_render_queue)
+        self._render_tick_timer.start()
         self._reflect_render_queue()
 
     def _finish_render_job(self, success: bool, message: str = "") -> None:
@@ -2412,6 +2719,9 @@ class _MediaWorkspace(QWidget):
         job = job.mark_succeeded() if success else job.mark_failed(message)
         self._render_queue = self._render_queue.replace_job(job)
         self._active_render_job = None
+        timer = getattr(self, "_render_tick_timer", None)
+        if timer is not None:
+            timer.stop()
         self._reflect_render_queue()
 
     def _reflect_render_queue(self) -> None:
@@ -2431,14 +2741,27 @@ class _MediaWorkspace(QWidget):
             latest = queue.jobs[-1]
             row._title_lbl.set_text(latest.source)
             status = latest.status
-            row._sub_lbl.set_text(f"Render · {status}")
             if status == "running":
-                row._pct_lbl.set_text("Running…")
-                row._progress.set_value(0.1)
+                import time as _time
+
+                elapsed = _time.monotonic() - getattr(
+                    self, "_render_started_at", _time.monotonic()
+                )
+                row._sub_lbl.set_text(
+                    f"Render · running · {int(elapsed)}s elapsed"
+                )
+                row._pct_lbl.set_text(f"{int(elapsed)}s")
+                # Honest progress estimate: renders typically take on the
+                # order of the media duration; cap at 90% until completion
+                # is confirmed (never claim done before it is).
+                duration = max(1.0, self._timeline.duration())
+                row._progress.set_value(min(0.9, elapsed / duration))
             elif status == "succeeded":
+                row._sub_lbl.set_text("Render · complete")
                 row._pct_lbl.set_text("Done")
                 row._progress.set_value(1.0)
             else:
+                row._sub_lbl.set_text(f"Render · {status}")
                 row._pct_lbl.set_text(status.capitalize())
                 row._progress.set_value(0.0)
 
@@ -2553,6 +2876,9 @@ class _MediaWorkspace(QWidget):
         # History: push the pre-edit snapshot (captured after the previous
         # persist) so Ctrl+Z restores the state before this edit.
         if record_history:
+            # Any user edit marks the timeline as owned by the user, so a
+            # media switch will no longer replace it with a fresh baseline.
+            self._timeline_user_edited = True
             previous = getattr(self, "_last_clips_snapshot", None)
             if previous is not None:
                 if not hasattr(self, "_undo_stack"):
@@ -2602,8 +2928,84 @@ class _MediaWorkspace(QWidget):
         self._persist_timeline_to_backend()
 
     def _on_playback_state_changed(self, state: str) -> None:
-        """Mirror the timeline transport state onto the TransportBar (UI-only)."""
+        """Mirror the timeline transport state onto the TransportBar."""
         self._transport.set_state(state)
+        if state == "playing":
+            self._start_decoder()
+        elif state in ("paused", "stopped"):
+            self._stop_decoder()
+
+    def _start_decoder(self) -> None:
+        """Start the persistent-pipe background decoder for smooth playback."""
+        if self._decoder is not None:
+            return
+        if self._controller is None or self._media_path is None:
+            return
+        fps = self._media_fps()
+        start = self._timeline.playhead()
+        decoder = _FrameDecoder(
+            self._controller, self._media_path,
+            fps=fps, max_frames=8, start_at=start,
+        )
+        # Wire decoder error signal to show failures to user
+        decoder.error.connect(self._on_decoder_error)
+        decoder.start()
+        self._decoder = decoder
+        # Frame pacing: frame N of this stream corresponds to media time
+        # start + N/fps. A frame is popped only once the playhead reaches
+        # its timestamp, so display speed always matches the playhead
+        # (including rate changes) regardless of decode speed.
+        self._decoder_start = start
+        self._decoder_frames_shown = 0
+        self._decoder_fps = fps
+
+    def _stop_decoder(self) -> None:
+        """Stop the background decoder (idempotent)."""
+        dec = self._decoder
+        if dec is None:
+            return
+        self._decoder = None
+        dec.stop_decoding()
+        dec.quit()
+        dec.wait(2000)
+
+    def _on_decoder_error(self, message: str) -> None:
+        """Handle decoder errors by stopping playback and showing error to user."""
+        self._timeline.pause()
+        self._stop_decoder()
+        self._detail_status.set_text(f"Playback error: {message}")
+        # Show error in preview status badge too
+        badge = getattr(self, "_preview_status_badge", None)
+        if badge is not None:
+            badge.setText(f"Error: decode failed")
+
+    def _pull_playback_frame(self, seconds: float):
+        """Pull the next due frame from the decoder (paced to media time).
+
+        Skips ahead (dropping late frames) when the playhead outran the
+        stream, so audio/video never drift apart.
+        """
+        dec = self._decoder
+        if dec is None:
+            return None
+        fps = getattr(self, "_decoder_fps", 30.0)
+        start = getattr(self, "_decoder_start", 0.0)
+        shown = getattr(self, "_decoder_frames_shown", 0)
+        next_time = start + shown / fps
+        if seconds + (0.5 / fps) < next_time:
+            return None  # next frame not due yet
+        frame = dec.pop()
+        if frame is None:
+            return None
+        self._decoder_frames_shown = shown + 1
+        # Catch-up: drop frames that are already older than the playhead.
+        while start + self._decoder_frames_shown / fps < seconds - (1.0 / fps):
+            skipped = dec.pop()
+            if skipped is None:
+                break
+            frame = skipped
+            self._decoder_frames_shown += 1
+        return frame
 
     # ------------------------------------------------------------------ #
     # Preview playback wiring (transport seek / loop / step / speed / etc.)
@@ -2614,10 +3016,16 @@ class _MediaWorkspace(QWidget):
         The timeline stays the single playback clock: its set_playhead emits
         playhead_changed which decodes+displays the frame and (via
         _on_playhead_changed -> transport.set_position) keeps the scrubber in
-        sync without re-emitting seek_requested (no loop).
+        sync without re-emitting seek_requested (no loop). A seek during
+        playback re-anchors the streaming decoder at the new position.
         """
         duration = self._timeline.duration()
-        self._timeline.set_playhead(max(0.0, min(1.0, fraction)) * duration)
+        target = max(0.0, min(1.0, fraction)) * duration
+        if self._decoder is not None:
+            self._decoder.seek(target)
+            self._decoder_start = target
+            self._decoder_frames_shown = 0
+        self._timeline.set_playhead(target)
 
     def _on_playback_finished(self) -> None:
         """Loop playback when the loop toggle is active."""
@@ -2681,6 +3089,7 @@ class _MediaWorkspace(QWidget):
     def _wire_viewer_toolbar(self) -> None:
         """Connect the viewer toolbar's zoom / screenshot / fullscreen controls."""
         self._loop_enabled = False
+        self._decoder: Optional[_FrameDecoder] = None
         zoom = self.findChild(Dropdown, "MediaWorkspaceViewerZoom")
         if zoom is not None:
             zoom.changed.connect(self._on_viewer_zoom_changed)
@@ -2699,7 +3108,7 @@ class _MediaWorkspace(QWidget):
             or getattr(self._transport, "_rate", None)
         if self._rate_label is not None:
             self._register_click(self._rate_label, self._cycle_playback_rate)
-        self._loop_label = self.findChild(QLabel, "MediaWorkspacePlayerLoop")
+        self._loop_label = self.findChild(QWidget, "MediaWorkspacePlayerLoop")
         if self._loop_label is not None:
             self._register_click(self._loop_label, self._toggle_loop)
 
@@ -2743,11 +3152,17 @@ class _MediaWorkspace(QWidget):
         except ValueError:
             rate = 1.0
         self._timeline.set_playback_rate(rate)
+        audio_rate_ok = True
         if self._audio_player is not None:
             try:
                 self._audio_player.setPlaybackRate(rate)
             except Exception:
-                pass
+                audio_rate_ok = False
+        # Warn user if audio rate sync failed
+        if not audio_rate_ok and rate != 1.0:
+            self._detail_status.set_text(
+                f"Speed: {rate:g}x (audio at 1x — backend limitation)"
+            )
         label = self._rate_label
         if label is not None:
             text = f"{rate:g}x"
@@ -3018,17 +3433,42 @@ class _MediaWorkspace(QWidget):
     def _on_property_changed(self, key: str, value) -> None:
         """Write a clip/property value through the backend settings store.
 
-        Reuses the controller's existing ``set_setting`` (StateStore.
-        update_setting -> SettingsChanged on the bus). Values are namespaced
-        (``clip.rotation``, ``clip.opacity``, ...) so they never collide with
-        other settings. UI-only mode records nothing (no fabricated backend).
+        Property keys are scoped to the SELECTED timeline clip when one is
+        selected (``clip.3.rotation``), falling back to the unscoped key
+        (``clip.rotation``) with no selection — so per-clip values never
+        overwrite each other. Writes go through the controller's existing
+        ``set_setting`` (StateStore.update_setting -> SettingsChanged), which
+        keeps them in ProjectState snapshots (undo/redo compatible via the
+        project save files). Real-time visual feedback is applied to the
+        selected clip widget for opacity.
         """
+        selected = self._timeline.selected_index()
+        if key.startswith("clip.") and selected >= 0:
+            prop = key.split(".", 1)[1]
+            key = f"clip.{selected}.{prop}"
+            # Real-time feedback: opacity dims the actual clip widget.
+            if prop == "opacity":
+                self._apply_clip_opacity(selected, float(value))
         if self._controller is None:
             return
         try:
             self._controller.set_setting(key, value)
         except Exception:
             pass
+
+    def _apply_clip_opacity(self, index: int, percent: float) -> None:
+        """Dim the selected timeline clip widget to ``percent`` opacity."""
+        widgets = getattr(self._timeline, "_clip_widgets", [])
+        if not (0 <= index < len(widgets)) or widgets[index] is None:
+            return
+        from PySide6.QtWidgets import QGraphicsOpacityEffect
+
+        frame = widgets[index]
+        effect = frame.graphicsEffect()
+        if not isinstance(effect, QGraphicsOpacityEffect):
+            effect = QGraphicsOpacityEffect(frame)
+            frame.setGraphicsEffect(effect)
+        effect.setOpacity(max(0.1, min(1.0, percent / 100.0)))
 
     def _wire_transform_fields(self, accordion) -> None:
         """Wire the Transform accordion's axis TextFields to backend settings.
@@ -3311,6 +3751,131 @@ class _MediaWorkspace(QWidget):
                 lambda n=name_lbl.text(): self._open_recent_by_name(n),
             )
 
+    def _on_nav_changed(self, index: int) -> None:
+        """Route every sidebar nav item to a real, existing surface.
+
+        No new screens are fabricated: each item maps to the existing panel
+        or region that already implements it, and items with no existing
+        surface report that honestly in the Details status row instead of
+        silently doing nothing.
+        """
+        # Hide the optional overlays first; the chosen item re-shows its own.
+        self._browser.setVisible(False)
+        self._ai_host.setVisible(False)
+        self._inspector_host.setVisible(False)
+        names = self._sidebar.items()
+        name = names[index] if 0 <= index < len(names) else f"#{index}"
+        if index == getattr(self, "_nav_media_index", 2):  # Media
+            self._browser.setVisible(True)
+            if self._browser.current_index() < 0 and self._browser.count() > 0:
+                self._browser.select(0)
+        elif name == "Projects":
+            # Recent projects live in the sidebar itself; surface the count.
+            count = len(self.recent_projects())
+            self._detail_status.set_text(
+                f"Projects: {count} recent (see sidebar)"
+            )
+        elif name == "Timeline":
+            self._timeline.setFocus()
+            self._detail_status.set_text("Timeline focused")
+        elif name == "AI Studio":
+            self._ai_host.setVisible(True)
+        elif name == "Effects":
+            self._detail_status.set_text(
+                "Effects: toggles in the right panel (no render backend yet)"
+            )
+        elif name == "Export":
+            started = self.export()
+            self._detail_status.set_text(
+                "Export: render phase started" if started
+                else "Export: run the AI pipeline first (render is gated)"
+            )
+        elif name == "Audio":
+            self._detail_status.set_text(
+                "Audio: use Mute/Solo on timeline track headers"
+            )
+        elif name == "Captions":
+            started = self.run_phase("subtitles")
+            self._detail_status.set_text(
+                "Captions: subtitle generation started" if started
+                else "Captions: select a video first"
+            )
+        else:
+            # Dashboard / Assets / Transitions / Templates / Settings:
+            # no dedicated surface exists in this screen yet — say so.
+            self._detail_status.set_text(f"{name}: coming soon")
+
+    # ------------------------------------------------------------------ #
+    # AI Assistant wiring (AIController -> ai_core pipeline)
+    # ------------------------------------------------------------------ #
+    def _ai_view_state(self) -> dict:
+        """View-only context for the AI ContextEngine."""
+        selected = self._timeline.selected_clip()
+        return {
+            "selected_clip": (
+                str(selected.get("label", "")) if selected else ""
+            ),
+            "playhead_seconds": self._timeline.playhead(),
+        }
+
+    def _submit_ai(self, capability: str, prompt: str) -> None:
+        """Submit an AI request through the AIController (async)."""
+        if self._ai_controller is None:
+            self._detail_status.set_text("AI: no AI controller (offline)")
+            return
+        if not self._ai_controller.submit(capability, prompt):
+            self._detail_status.set_text("AI: busy — request in progress")
+
+    def _on_play_tile_clicked(self) -> None:
+        """Empty-state play button: select the first media and play.
+
+        With no media selected, selects the browser's first item (which
+        decodes and displays the first frame via the existing selection
+        path), then starts playback. With media already selected it simply
+        toggles play.
+        """
+        if self._media_path is None and self._browser.count() > 0:
+            index = self._browser.current_index()
+            self._browser.select(0 if index < 0 else index)
+        if self._media_path is not None:
+            self._timeline.play()
+        else:
+            self._detail_status.set_text(
+                "No media: use Import (Ctrl+I) or drop a video file here"
+            )
+
+    def _on_ai_ask(self) -> None:
+        """Run the AI prompt field's text through the chat pipeline."""
+        prompt = self._ai_prompt.text().strip()
+        if not prompt:
+            self._detail_status.set_text("AI: type a prompt first")
+            return
+        self._submit_ai("chat", prompt)
+
+    def _on_ai_request_started(self, capability: str) -> None:
+        self._set_phase_status(f"AI: {capability}…")
+
+    def _on_ai_request_completed(self, capability: str, result) -> None:
+        self._set_phase_status("AI: done")
+        # Surface a compact result summary in the Details status row.
+        text = ""
+        if isinstance(result, str):
+            text = result[:160]
+        elif hasattr(result, "titles"):
+            text = "; ".join(result.titles[:3])
+        elif hasattr(result, "prompt"):
+            text = result.prompt[:160]
+        elif hasattr(result, "segments"):
+            text = f"{len(result.segments)} segment(s)"
+        elif hasattr(result, "tags"):
+            text = ", ".join(result.tags[:8])
+        if text:
+            self._detail_status.set_text(f"AI {capability}: {text}")
+
+    def _on_ai_request_failed(self, capability: str, message: str) -> None:
+        self._set_phase_status("AI: failed")
+        self._detail_status.set_text(f"AI {capability} failed: {message[:120]}")
+
     def _open_recent_by_name(self, name: str) -> None:
         """Open the saved project whose filename matches ``name`` (slugged)."""
         from pathlib import Path as _P
@@ -3444,15 +4009,22 @@ class _MediaWorkspace(QWidget):
 
         Normalizes the playhead time to the timeline duration; set_position
         clamps and does not re-emit seek_requested, so there is no loop.
+        During playback, pulls from the background decoder queue (no UI
+        blocking). During seeking, decodes on demand.
         """
         duration = self._timeline.duration()
         fraction = seconds / duration if duration > 0 else 0.0
         self._transport.set_position(fraction)
-        # Timecode readouts (HUD + transport) follow the single playhead.
         self._update_timecode_displays(seconds)
-        # Real playback: decode and display the frame at the new playhead. The
-        # Timeline widget's own timer drives playhead_changed as playback
-        # advances, so this reuses the existing timer (no second owner).
+        # During playback, prefer the paced background decoder stream.
+        if self._decoder is not None:
+            frame = self._pull_playback_frame(seconds)
+            if frame is not None:
+                self.show_frame(frame)
+            # No frame due yet (or decoder warming up): keep the last frame
+            # on screen — falling back to a blocking per-frame decode here
+            # would stall the GUI thread and break audio sync.
+            return
         self._decode_and_show(seconds)
 
 

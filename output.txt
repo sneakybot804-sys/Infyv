@@ -1,0 +1,1 @@
+steady-state: 30.0 fps (45 in 1.50s, media 30fps)

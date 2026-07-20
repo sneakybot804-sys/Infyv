@@ -1,0 +1,30 @@
+* [33m24b30c1[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mfeature/backend-timeline-model[m[33m, [m[1;31morigin/feature/backend-timeline-model[m[33m)[m Save local workspace changes
+* [33m21e6d1f[m[33m ([m[1;31morigin/feature/workflow-integration[m[33m, [m[1;31morigin/HEAD[m[33m)[m chore(tests): drop unused SectionHeader import in integration test
+* [33m9dad256[m chore(media-workspace): remove unused import, redundant lazy imports, stale comment
+* [33m2fbaa11[m test(media-workspace): restore exact artifact-status assertions
+* [33m47874a4[m revert(media-workspace): keep Details Status row to artifact status only
+* [33m02fef4a[m test(media-workspace): adjust Status assertions for runnable-phase suffix
+* [33m2b22aac[m feat(media-workspace): surface runnable phase count in existing Details status
+* [33m4109bfa[m test(media-workspace): Details artifacts refresh after phase completion
+* [33me8e5b7f[m feat(media-workspace): refresh Details artifacts after phase completion
+* [33m6752008[m test(media-workspace): use explicit run_phase(phase_id)
+* [33m8fcf278[m refactor(media-workspace): explicit run_phase(phase_id), drop implicit helper
+* [33mf164f3d[m test(media-workspace): cover phase-execution integration
+* [33m19979e3[m feat(media-workspace): phase-execution integration (observe + trigger)
+* [33me529d3d[m Revert placeholder Timeline playhead-reset (not a real integration)
+* [33m0e1b0fa[m test(media-workspace): assert Timeline playhead resets on selection
+* [33md01f6cc[m feat(media-workspace): reset Timeline playhead on selection (ProjectState observer)
+* [33m6d97019[m test(media-workspace): fix Status assertions to read _detail_status directly
+* [33m09e01a1[m test(media-workspace): assert rendered Status text reflects artifacts
+* [33m5204283[m refactor(media-workspace): simplify Preview Status text to match existing UI
+* [33m62b5437[m test(media-workspace): remove dead local in preview-type assertion
+* [33me095dee[m test(media-workspace): cover Preview-as-ProjectState-observer behavior
+* [33m4eb4243[m feat(media-workspace): make Preview a true observer of ProjectState
+* [33m1659121[m test(media-workspace): tidy ProjectState-reflection assertion
+* [33me6c3122[m test(media-workspace): cover in-screen MediaBrowser -> WorkflowController wiring
+* [33maf7bb9c[m feat(media-workspace): integrate MediaBrowser with WorkflowController in-screen
+* [33ma64f2a5[m[33m ([m[1;32mfeature/workflow-integration[m[33m, [m[1;32mfeature/right-sidebar-unified-stream[m[33m)[m refactor(media-workspace): stack X-over-Y axis coordinates vertically
+* [33m900d6f0[m refactor(media-workspace): shared unified grid for Properties rows
+* [33m49376a7[m fix(media-workspace): grid-split Transform axis rows + dB audio unit
+* [33mbe33007[m fix(media-workspace): clean left-right alignment for Transform axis rows
+* [33m2108233[m fix(media-workspace): X/Y axis Transform rows + single-slider Audio

@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from typing import List, Optional, Sequence, Tuple
 
-from PySide6.QtCore import QEasingCurve, QParallelAnimationGroup, QPropertyAnimation, QVariantAnimation, Qt, Signal
+from PySide6.QtCore import QEasingCurve, QParallelAnimationGroup, QPropertyAnimation, QTimer, QVariantAnimation, Qt, Signal
 from PySide6.QtGui import QPainter
 from PySide6.QtWidgets import (
     QFrame,
@@ -178,6 +178,20 @@ class _ThinBar(QFrame):
         # After animation finishes, unlock the maximum so resize works.
         self._fill_anim.finished.connect(lambda: self._fill.setMaximumWidth(16777215))
 
+    def set_percent(self, percent: int) -> None:
+        """Update the fill width to ``percent`` (0–100), animated."""
+        self._percent = max(0, min(100, int(percent)))
+        total = self.width()
+        if total <= 0:
+            return
+        target = int(total * self._percent / 100)
+        self._fill_anim.stop()
+        self._fill_anim.setDuration(300)
+        self._fill_anim.setStartValue(self._fill.width())
+        self._fill_anim.setEndValue(target)
+        self._fill_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._fill_anim.start()
+
 
 class NavigationSidebar(ThemedWidget):
     """The premium left navigation region (UI-only, additive).
@@ -234,6 +248,131 @@ class NavigationSidebar(ThemedWidget):
         # The showEvent override below re-applies nav styles after Qt's first
         # layout pass so the active highlight is never wiped by a cascade reset.
         self.apply_theme()
+
+        # Live system metrics timer: update CPU/RAM/GPU every second.
+        self._system_timer = QTimer(self)
+        self._system_timer.setInterval(1000)
+        self._system_timer.timeout.connect(self._update_system_metrics)
+        self._system_timer.start()
+        self._gpu_percent = 0
+
+    def _update_system_metrics(self) -> None:
+        """Fetch real CPU/RAM/GPU and update the system bars."""
+        try:
+            import psutil
+            ram_pct = int(psutil.virtual_memory().percent)
+            cpu_pct = int(psutil.cpu_percent(interval=0))
+        except Exception:
+            ram_pct = 0
+            cpu_pct = 0
+        # GPU utilization via nvidia-smi (NVIDIA only; other vendors expose
+        # no portable utilization API — name still resolves below).
+        try:
+            import subprocess
+            out = subprocess.check_output(
+                ["nvidia-smi", "--query-gpu=utilization.gpu",
+                 "--format=csv,noheader,nounits"],
+                timeout=2, stderr=subprocess.DEVNULL,
+            )
+            self._gpu_percent = int(out.strip().split(b"\n")[0])
+        except Exception:
+            pass
+        gpu_pct = self._gpu_percent
+        values = [gpu_pct, ram_pct, cpu_pct]
+        subs = [
+            self._gpu_name(),
+            f"{self._ram_gb()} GB",
+            self._cpu_name(),
+        ]
+        for i, bar in enumerate(self._system_bars):
+            bar.set_percent(values[i])
+        for i, pct_lbl in enumerate(self._system_pcts):
+            pct_lbl.setText(f"{values[i]}%")
+        for i, sub_lbl in enumerate(self._system_subs):
+            sub_lbl.set_text(subs[i])
+
+    def _gpu_name(self) -> str:
+        """Real GPU name: nvidia-smi first, then Windows WMI (any vendor)."""
+        cached = getattr(self, "_gpu_name_cache", None)
+        if cached:
+            return cached
+        name = ""
+        try:
+            import subprocess
+            out = subprocess.check_output(
+                ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+                timeout=2, stderr=subprocess.DEVNULL,
+            )
+            name = out.strip().decode(errors="replace").splitlines()[0]
+        except Exception:
+            pass
+        if not name:
+            # Windows WMI: works for Intel / AMD / NVIDIA alike. Multiple
+            # adapters may be returned (virtual displays included) — prefer
+            # a real GPU vendor entry over virtual/USB display adapters.
+            try:
+                import subprocess
+                out = subprocess.check_output(
+                    ["powershell", "-NoProfile", "-Command",
+                     "(Get-CimInstance Win32_VideoController).Name"],
+                    timeout=5, stderr=subprocess.DEVNULL,
+                )
+                lines = [
+                    line.strip() for line in
+                    out.decode(errors="replace").splitlines() if line.strip()
+                ]
+                vendors = ("nvidia", "amd", "radeon", "intel", "geforce", "arc")
+                real = [
+                    l for l in lines
+                    if any(v in l.lower() for v in vendors)
+                ]
+                if real:
+                    name = real[0]
+                elif lines:
+                    name = lines[0]
+            except Exception:
+                pass
+        self._gpu_name_cache = name or "No GPU detected"
+        return self._gpu_name_cache
+
+    def _cpu_name(self) -> str:
+        """Real CPU model name (cached; WMI on Windows, platform fallback)."""
+        cached = getattr(self, "_cpu_name_cache", None)
+        if cached:
+            return cached
+        name = ""
+        try:
+            import subprocess
+            out = subprocess.check_output(
+                ["powershell", "-NoProfile", "-Command",
+                 "(Get-CimInstance Win32_Processor).Name"],
+                timeout=5, stderr=subprocess.DEVNULL,
+            )
+            name = out.decode(errors="replace").strip().splitlines()[0].strip()
+        except Exception:
+            pass
+        if not name:
+            try:
+                import platform
+                name = platform.processor() or ""
+            except Exception:
+                pass
+        if not name:
+            try:
+                import psutil
+                name = f"{psutil.cpu_count(logical=True)}-Core"
+            except Exception:
+                name = "CPU"
+        self._cpu_name_cache = name
+        return name
+
+    def _ram_gb(self) -> str:
+        """Total RAM in GB."""
+        try:
+            import psutil
+            return f"{psutil.virtual_memory().total / (1024**3):.1f}"
+        except Exception:
+            return "??"
 
     # ------------------------------------------------------------------ #
     # Qt overrides
@@ -539,7 +678,7 @@ class NavigationSidebar(ThemedWidget):
         wrap.setObjectName("NavigationSidebarSystem")
         layout = QVBoxLayout(wrap)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(self.scaled(tokens.spacing.sm))  # explicit 8px gap
+        layout.setSpacing(self.scaled(tokens.spacing.sm))
 
         title = QLabel("SYSTEM", wrap)
         title.setObjectName("NavigationSystemTitle")
@@ -561,10 +700,18 @@ class NavigationSidebar(ThemedWidget):
                 f"stop:0 {c.success}, stop:1 {c.accent_cyan})"
             ),
         }
+        # Store bar/label refs for live updates.
+        self._system_bars: list = []
+        self._system_pcts: list = []
+        self._system_subs: list = []
         for label, sub, percent, accent in _SYSTEM_METRICS:
-            layout.addWidget(
-                self._system_row(label, sub, percent, accent_map[accent])
+            row_widget, bar, pct_lbl, sub_lbl = self._system_row(
+                label, sub, percent, accent_map[accent]
             )
+            self._system_bars.append(bar)
+            self._system_pcts.append(pct_lbl)
+            self._system_subs.append(sub_lbl)
+            layout.addWidget(row_widget)
 
         # Engine readouts: label + sub-label + trailing "Active" badge.
         for label, sub in _SYSTEM_ENGINES:
@@ -573,8 +720,11 @@ class NavigationSidebar(ThemedWidget):
 
     def _system_row(
         self, label: str, sub: str, percent: int, fill_color: str
-    ) -> QWidget:
-        """Build one stacked metric row: label + %, sub-label, thin bar."""
+    ) -> tuple:
+        """Build one stacked metric row: label + %, sub-label, thin bar.
+
+        Returns ``(row_widget, bar, pct_label, sub_label)`` for live updates.
+        """
         tokens = self.tokens
         c = tokens.colors
         row = QWidget(self)
@@ -626,7 +776,7 @@ class NavigationSidebar(ThemedWidget):
             f"#NavigationSystemPercent {{ color: {c.text_primary}; "
             f"background: transparent; }}"
         )
-        return row
+        return row, bar, pct, sub_label
 
     def _engine_row(self, parent: QWidget, label: str, sub: str) -> QWidget:
         """Build one engine readout row: label over sub + trailing badge."""
