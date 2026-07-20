@@ -94,7 +94,8 @@ class _FrameDecoder(QThread):
     error = Signal(str)
 
     def __init__(self, controller, media_path, fps: float = 30.0,
-                 max_frames: int = 8, start_at: float = 0.0, parent=None):
+                 max_frames: int = 24, start_at: float = 0.0,
+                 scale_width: int = 0, parent=None):
         super().__init__(parent)
         self._controller = controller
         self._media_path = media_path
@@ -106,6 +107,12 @@ class _FrameDecoder(QThread):
         self._start_at = max(0.0, float(start_at))
         self._seek_to: Optional[float] = None
         self._proc = None
+        # Target preview width for ffmpeg-side downscaling. <= 0 means decode
+        # at source resolution (back-compatible default). Decoding at the
+        # preview width is the single biggest playback-smoothness win: it
+        # shrinks the per-frame pipe payload and makes GUI-thread scaling
+        # trivial, without changing the pipeline shape.
+        self._scale_width = max(0, int(scale_width))
 
     def run(self):
         """Stream frames from one persistent ffmpeg pipe until stopped."""
@@ -116,14 +123,28 @@ class _FrameDecoder(QThread):
         # Probe once for dimensions (backend metadata; no per-frame probe).
         try:
             meta = self._controller.media_metadata(self._media_path)
-            width = int(getattr(meta, "width", 0) or 0)
-            height = int(getattr(meta, "height", 0) or 0)
+            src_width = int(getattr(meta, "width", 0) or 0)
+            src_height = int(getattr(meta, "height", 0) or 0)
         except Exception as exc:
             self.error.emit(f"metadata failed: {exc}")
             return
-        if width <= 0 or height <= 0:
+        if src_width <= 0 or src_height <= 0:
             self.error.emit("invalid video dimensions")
             return
+        # Compute the DECODE resolution. When a preview width is requested and
+        # is smaller than the source, ffmpeg downscales to it (height derived
+        # to keep the aspect ratio, forced even for yuv->bgr conversion). The
+        # emitted frame dimensions must exactly match the reshape below, so
+        # they are computed here from the same rule ffmpeg's scale=w:-2 uses.
+        vf = None
+        width, height = src_width, src_height
+        if 0 < self._scale_width < src_width:
+            width = self._scale_width - (self._scale_width % 2)  # even width
+            height = int(round(src_height * (width / src_width)))
+            height -= height % 2  # -2 in ffmpeg: nearest even, keep aspect
+            width = max(2, width)
+            height = max(2, height)
+            vf = f"scale={width}:{height}"
         frame_bytes = width * height * 3
         start = self._start_at
 
@@ -133,6 +154,10 @@ class _FrameDecoder(QThread):
                 "ffmpeg", "-nostdin", "-loglevel", "error",
                 "-ss", f"{start:.3f}",
                 "-i", str(self._media_path),
+            ]
+            if vf is not None:
+                cmd += ["-vf", vf]
+            cmd += [
                 "-f", "rawvideo", "-pix_fmt", "bgr24",
                 "pipe:1",
             ]
@@ -180,6 +205,14 @@ class _FrameDecoder(QThread):
         proc = self._proc
         self._proc = None
         if proc is not None:
+            # Close the stdio pipes BEFORE waiting so the child's writes fail
+            # fast and no pipe file descriptor is leaked per seek/stop.
+            for pipe in (proc.stdout, proc.stderr):
+                try:
+                    if pipe is not None:
+                        pipe.close()
+                except Exception:
+                    pass
             try:
                 proc.kill()
                 proc.wait(timeout=2)
@@ -2943,9 +2976,19 @@ class _MediaWorkspace(QWidget):
             return
         fps = self._media_fps()
         start = self._timeline.playhead()
+        # Decode at the preview stage width so ffmpeg emits small frames and
+        # the GUI-thread scale becomes trivial. Fall back to a sane width
+        # before the stage has been laid out.
+        stage = self._preview_frame.parentWidget()
+        scale_width = 0
+        if stage is not None and stage.width() > 100:
+            scale_width = int(stage.width())
+        else:
+            scale_width = 960
         decoder = _FrameDecoder(
             self._controller, self._media_path,
-            fps=fps, max_frames=8, start_at=start,
+            fps=fps, max_frames=24, start_at=start,
+            scale_width=scale_width,
         )
         # Wire decoder error signal to show failures to user
         decoder.error.connect(self._on_decoder_error)
