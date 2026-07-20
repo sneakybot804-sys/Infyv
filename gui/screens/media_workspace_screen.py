@@ -791,6 +791,12 @@ class _MediaWorkspace(QWidget):
         self._preview_frame.setStyleSheet(
             "#MediaWorkspacePreviewFrame { background: transparent; }"
         )
+        # Never stretch the pixmap to the label's bounds: the label keeps a
+        # stable, layout-controlled geometry and centers the already-scaled,
+        # letterboxed pixmap. This (plus scaling against the stage, not the
+        # label) prevents the per-frame size feedback loop that made the
+        # preview "breathe" during playback.
+        self._preview_frame.setScaledContents(False)
         self._preview_frame.setVisible(False)
         stage_layout.addWidget(self._preview_frame, 1)
 
@@ -2218,13 +2224,12 @@ class _MediaWorkspace(QWidget):
         except Exception:
             return
         zoom_text = getattr(self, "_preview_zoom", "Fit")
-        # Determine the target size for scaling.  Use the frame size
-        # if it's been laid out, otherwise fall back to the stage size.
-        target = self._preview_frame.size()
-        if target.width() <= 100 or target.height() <= 100:
-            stage = self._preview_frame.parentWidget()
-            if stage is not None:
-                target = stage.size()
+        # Stable target: scale against the STAGE (the layout-controlled
+        # parent), never against the frame sink itself, and cache it so the
+        # target only changes on an actual resize -- not every frame. Reading
+        # the target from the label being sized created a feedback loop that
+        # made the preview "breathe" during playback.
+        target = self._preview_render_target()
         # Scaling mode: smooth for stills (seek/pause), fast during
         # playback — smooth scaling of HD frames on the GUI thread costs
         # more than a frame interval and drops the display rate.
@@ -2273,13 +2278,28 @@ class _MediaWorkspace(QWidget):
         safe = self.findChild(QFrame, "MediaWorkspacePreviewSafeArea")
         if safe is not None:
             safe.setVisible(False)
-        # Force the QLabel to the stage size so scaling targets the full
-        # viewport (prevents the label from shrinking to the pixmap size).
-        stage = self._preview_frame.parentWidget()
-        if stage is not None:
-            self._preview_frame.resize(stage.size())
+        # No per-frame resize: the frame sink is layout-managed (stretch=1,
+        # AlignCenter), so it already fills the stage with stable geometry and
+        # centers the letterboxed pixmap. Only the image content changes.
         self._preview_frame.setPixmap(pixmap)
         self._preview_frame.setVisible(True)
+
+    def _preview_render_target(self):
+        """Return the cached scale target (the stage size), recomputed only
+        on an actual resize.
+
+        The target is taken from the preview stage (the layout-controlled
+        parent), never from the frame sink itself, so scaling never feeds back
+        into the widget's own size. It is cached in ``_preview_target_size``
+        and refreshed only when the stage size genuinely changes, so a frame
+        is rescaled only when the frame changes OR the preview is resized.
+        """
+        stage = self._preview_frame.parentWidget()
+        size = stage.size() if stage is not None else self._preview_frame.size()
+        cached = getattr(self, "_preview_target_size", None)
+        if cached is None or cached != size:
+            self._preview_target_size = size
+        return self._preview_target_size
 
     def clear_frame(self) -> None:
         """Hide the frame sink and restore the empty-state placeholder."""
