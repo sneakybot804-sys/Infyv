@@ -17,7 +17,7 @@ from typing import Optional
 
 from PySide6.QtWidgets import QMainWindow, QWidget
 
-from gui.screens.media_workspace_screen import build_media_workspace_screen
+from gui.screens import build_studio_screen
 from gui.theme.manager import ThemeManager
 
 #: The visible window title owned by the shell (the child screen's own window
@@ -25,39 +25,12 @@ from gui.theme.manager import ThemeManager
 _WINDOW_TITLE = "AI Gaming Video Editor"
 
 
-def _build_backend_controller():
-    """Build the live backend controller for the production editor.
-
-    Constructs the existing, Qt-free ``ApplicationFacade`` over the shared
-    app ``config`` and wraps it in the interactive ``WorkflowController`` that
-    the media workspace consumes for real playback (decode / metadata /
-    audio), timeline persistence and phase execution. No new architecture is
-    introduced -- only the existing constructors are used.
-
-    Failure-tolerant: if the backend cannot be built (e.g. missing optional
-    dependencies in a headless/CI environment), returns ``None`` so the
-    caller can still launch the real editor in UI-only mode rather than the
-    legacy studio mockup.
-    """
-    try:
-        from config import config
-        from gui.integration.workflow_controller import WorkflowController
-        from gui_core import ApplicationFacade
-
-        facade = ApplicationFacade(config)
-        controller = WorkflowController(facade)
-        controller.start()
-        return controller
-    except Exception:
-        return None
-
-
 class _MainWindow(QMainWindow):
-    """Internal shell window hosting the real Media Workspace editor.
+    """Internal shell window hosting the studio screen as its central widget.
 
     Args:
         theme: The injected theme manager (sole source of visual values),
-            passed straight through to the composed workspace screen.
+            passed straight through to the composed studio screen.
         parent: Optional Qt parent.
     """
 
@@ -65,23 +38,8 @@ class _MainWindow(QMainWindow):
         super().__init__(parent)
         self.setObjectName("MainWindow")
         self.setWindowTitle(_WINDOW_TITLE)
-        # The single production editor: the real Media Workspace, driven by a
-        # live backend controller (real playback / metadata / audio / phases).
-        self._controller = _build_backend_controller()
-        self.setCentralWidget(
-            build_media_workspace_screen(theme, self._controller)
-        )
+        self.setCentralWidget(build_studio_screen(theme))
         self.resize(1536, 960)
-
-    def closeEvent(self, event) -> None:  # noqa: N802 (Qt override)
-        """Tear the backend controller down cleanly on window close."""
-        controller = getattr(self, "_controller", None)
-        if controller is not None:
-            try:
-                controller.stop()
-            except Exception:
-                pass
-        super().closeEvent(event)
 
 
 def build_main_window(theme: ThemeManager) -> QMainWindow:
