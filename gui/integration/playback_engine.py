@@ -84,6 +84,20 @@ class FrameDecoder(QThread):
                 return self._queue[0][0]
         return None
 
+    def pop_if_due(self, playhead: float, tolerance: float = 0.001) -> Optional[_FrameT]:
+        """Atomically peek + pop if PTS <= playhead.
+
+        This eliminates the race between peek() and pop() where the decoder
+        could append+evict between the two calls.
+        """
+        with QMutexLocker(self._mutex):
+            if not self._queue:
+                return None
+            pts = self._queue[0][0]
+            if pts > playhead + tolerance:
+                return None
+            return self._queue.popleft()
+
     def clear(self) -> None:
         """Clear the frame buffer."""
         with QMutexLocker(self._mutex):
@@ -532,22 +546,16 @@ class PlaybackEngine(QObject):
     def _schedule_frame(self):
         """Display the next frame if its PTS <= playhead.
 
-        Exactly ONE frame is consumed per call. If multiple frames are
-        due (decoder ahead), only the last one that is still due is
-        displayed — earlier ones are silently discarded from the queue.
+        Uses atomic pop_if_due to prevent race between peek and pop.
+        If decoder is ahead (multiple frames due), only the LAST due
+        frame is displayed — earlier ones are discarded.
         """
         if self._decoder is None:
             return
 
         displayed = None
         while True:
-            peek = self._decoder.peek_pts()
-            if peek is None:
-                break
-            if peek > self._playhead + 0.001:  # 1ms tolerance
-                break
-            # This frame is due — pop it
-            frame_tuple = self._decoder.pop()
+            frame_tuple = self._decoder.pop_if_due(self._playhead)
             if frame_tuple is None:
                 break
             self._decoder_shown += 1
