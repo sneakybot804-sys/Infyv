@@ -30,65 +30,60 @@ DARK_THEME_NAME = "dark"
 
 
 _DARK_COLORS = ColorTokens(
-    # Layered near-black surfaces with a violet cast and a wide luminance
-    # step between each layer, so the application background, workspace,
-    # secondary panels, primary panels and floating controls read as clearly
-    # distinct depths (this is the main driver of the redesigned hierarchy):
-    #   background_deep  -> the app void behind everything (deepest)
-    #   background_base  -> the application background
-    #   surface          -> secondary panels
-    #   surface_elevated -> primary panels / cards
-    #   surface_overlay  -> floating controls / hover / popups (lightest)
-    background_deep="#07060b",
-    background_base="#0a0810",
-    surface="#120e1c",
-    surface_elevated="#161022",
-    surface_overlay="#221a36",
-    # Glass: violet-tinted translucent fill with a subtle light edge and
-    # sheen (tinted toward the panel color rather than a white haze).
-    glass_fill="rgba(22, 16, 34, 0.62)",
-    glass_border="rgba(168, 130, 240, 0.18)",
-    glass_highlight="rgba(216, 180, 255, 0.20)",
-    # Neon accents (base) + softer translucent glow used for outer glow/shadow.
-    # NEXUS purple primary, magenta neon secondary, fuchsia tertiary. The
-    # token names keep their historical "blue"/"cyan" spellings so every
-    # widget retints without renames.
-    accent_blue="#a855f7",
-    accent_blue_glow="rgba(168, 85, 247, 0.55)",
-    accent_cyan="#e879f9",
-    accent_cyan_glow="rgba(232, 121, 249, 0.55)",
-    accent_purple="#d946ef",
-    accent_purple_glow="rgba(217, 70, 239, 0.55)",
-    # Text shades with more contrast between levels.
-    text_primary="#f4f1fa",
-    text_secondary="#c3b8dd",
-    text_muted="#83779f",
-    text_disabled="#4c4363",
-    text_on_accent="#0a0810",
-    # Status.
-    success="#34d399",
-    success_glow="rgba(52, 211, 153, 0.50)",
+    # Adobe Premiere Pro-style dark theme: near-black to dark gray layered
+    # surfaces with neutral tone (no color cast). Clear depth hierarchy:
+    #   background_deep  -> the app void behind everything (deepest black)
+    #   background_base  -> the application background (near-black)
+    #   surface          -> secondary panels (dark gray)
+    #   surface_elevated -> primary panels / cards (medium dark gray)
+    #   surface_overlay  -> floating controls / hover / popups (lighter gray)
+    background_deep="#1a1a1a",
+    background_base="#232323",
+    surface="#2d2d2d",
+    surface_elevated="#3a3a3a",
+    surface_overlay="#454545",
+    # Glass: neutral gray translucent fill with subtle light edge.
+    glass_fill="rgba(58, 58, 58, 0.62)",
+    glass_border="rgba(74, 74, 74, 0.35)",
+    glass_highlight="rgba(90, 90, 90, 0.25)",
+    # Adobe-style accents: bright cyan-blue primary (#2ea3f2) for active states,
+    # selections, playhead. Purple (#b462ff) for certain UI elements and toggles.
+    # Token names kept as "blue"/"cyan" for compatibility - no widget renames needed.
+    accent_blue="#2ea3f2",
+    accent_blue_glow="rgba(46, 163, 242, 0.55)",
+    accent_cyan="#2ea3f2",
+    accent_cyan_glow="rgba(46, 163, 242, 0.55)",
+    accent_purple="#b462ff",
+    accent_purple_glow="rgba(180, 98, 255, 0.55)",
+    # Text: pure white/light gray shades for better readability on dark background.
+    text_primary="#e5e5e5",
+    text_secondary="#b3b3b3",
+    text_muted="#808080",
+    text_disabled="#5a5a5a",
+    text_on_accent="#1a1a1a",
+    # Status colors matching Adobe style.
+    success="#73c991",
+    success_glow="rgba(115, 201, 145, 0.50)",
     warning="#f5b93d",
     warning_glow="rgba(245, 185, 61, 0.50)",
     error="#f87171",
     error_glow="rgba(248, 113, 113, 0.50)",
-    # Lines / focus: solid violet-slate hairlines so panel edges read crisply
-    # against the deep background.
-    border="#2b2140",
-    divider="rgba(43, 33, 64, 0.60)",
-    focus_ring="rgba(217, 70, 239, 0.75)",
+    # Lines / focus: medium gray borders for subtle panel separation.
+    border="#4a4a4a",
+    divider="rgba(74, 74, 74, 0.60)",
+    focus_ring="rgba(46, 163, 242, 0.75)",
     # Extended accents (overlay clips / decorative category colors).
     accent_pink="#ec4899",
     accent_pink_glow="rgba(236, 72, 153, 0.55)",
-    # Timeline track category colors (match the reference lanes: video =
-    # violet thumbnails, music = green wave, sfx = purple wave, voice =
-    # blue wave, text/subtitles = fuchsia chips).
-    track_video="#8b5cf6",
+    # Timeline track category colors matching Adobe Premiere style:
+    # video = blue-violet, music = green wave, sfx = locked/muted gray,
+    # voice = purple wave, text/subtitles = blue chips.
+    track_video="#7289da",
     track_overlay="#ec4899",
-    track_text="#c084fc",
+    track_text="#2ea3f2",
     track_fx="#f5b93d",
-    track_audio="#34d399",
-    track_voice="#38bdf8",
+    track_audio="#73c991",
+    track_voice="#b462ff",
 )
 
 

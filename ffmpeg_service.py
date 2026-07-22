@@ -46,6 +46,8 @@ class FFmpegService:
     def __init__(self, app_config: AppConfig | None = None) -> None:
         self._config = app_config or config
         self._paths = self._config.paths
+        self._metadata_cache: dict[Path, VideoMetadata] = {}
+        self._cache_lock = __import__('threading').Lock()
         logger.info("Initialized FFmpegService")
 
     # ------------------------------------------------------------------ #
@@ -54,6 +56,11 @@ class FFmpegService:
     def read_metadata(self, video_path: str | Path) -> VideoMetadata:
         """Read metadata (duration, resolution, FPS, codec) for a video."""
         path = self._validate_input(video_path)
+
+        # Return cached metadata if available (thread-safe)
+        with self._cache_lock:
+            if path in self._metadata_cache:
+                return self._metadata_cache[path]
 
         try:
             probe: dict[str, Any] = ffmpeg.probe(str(path))
@@ -88,6 +95,9 @@ class FFmpegService:
             metadata.fps,
             metadata.codec,
         )
+        # Cache for subsequent calls (thread-safe)
+        with self._cache_lock:
+            self._metadata_cache[path] = metadata
         return metadata
 
     def detect_duration(self, video_path: str | Path) -> float:
@@ -269,7 +279,11 @@ class FFmpegService:
                 if not raw:
                     break
                 yield np.frombuffer(raw, dtype="<f4").astype(np.float32, copy=False)
-            process.wait()
+            try:
+                process.wait(timeout=30)
+            except Exception:
+                process.kill()
+                process.wait()
             if process.returncode not in (0, None):
                 stderr = process.stderr.read() if process.stderr else b""
                 message = stderr.decode("utf-8", errors="replace").strip()
@@ -288,7 +302,7 @@ class FFmpegService:
                         pass
                 if process.poll() is None:  # pragma: no cover - defensive
                     process.kill()
-                    process.wait()
+                    process.wait(timeout=10)
 
     def extract_frame_at(
         self,
@@ -317,16 +331,10 @@ class FFmpegService:
         if timestamp < 0:
             raise FFmpegServiceError("timestamp must be >= 0.")
 
-        try:
-            probe = ffmpeg.probe(str(path))
-        except ffmpeg.Error as exc:
-            message = self._decode_stderr(exc)
-            raise FFmpegServiceError(
-                f"Could not probe '{path}': {message}"
-            ) from exc
-        stream = self._first_video_stream(probe)
-        width = int(stream.get("width", 0))
-        height = int(stream.get("height", 0))
+        # Use cached metadata instead of spawning redundant ffprobe
+        meta = self.read_metadata(path)
+        width = meta.width
+        height = meta.height
         if width <= 0 or height <= 0:
             raise FFmpegServiceError(
                 f"Invalid video dimensions for '{path}': {width}x{height}."

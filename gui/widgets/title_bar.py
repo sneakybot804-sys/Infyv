@@ -50,7 +50,7 @@ class TitleBar(ThemedWidget):
         self,
         theme,
         *,
-        project_name: str = "Valorant Montage 2026",
+        project_name: str = "Untitled Project",
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(theme, parent)
@@ -79,7 +79,7 @@ class TitleBar(ThemedWidget):
         logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
         row.addWidget(logo)
 
-        title = QLabel("INFY EDIT PRO", self)
+        title = QLabel("AI Gaming Video Editor", self)
         title.setObjectName("WorkspaceTitleBarName")
         title.setMinimumWidth(120)
         row.addWidget(title)
@@ -89,7 +89,7 @@ class TitleBar(ThemedWidget):
         # --- Project selector pill (left of the menus, like the mock) ---
         project = QToolButton(self)
         project.setObjectName("WorkspaceProjectSelector")
-        project.setText(f"{self._project_name}  ·  4K 60fps")
+        project.setText(f"{self._project_name}")
         project.setCursor(Qt.CursorShape.PointingHandCursor)
         project.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         try:

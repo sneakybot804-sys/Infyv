@@ -31,18 +31,19 @@ class _MainWindow(QMainWindow):
     Args:
         theme: The injected theme manager (sole source of visual values),
             passed straight through to the composed studio screen.
+        controller: Optional WorkflowController for backend integration.
         parent: Optional Qt parent.
     """
 
-    def __init__(self, theme: ThemeManager, *, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, theme: ThemeManager, *, controller=None, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setObjectName("MainWindow")
         self.setWindowTitle(_WINDOW_TITLE)
-        self.setCentralWidget(build_studio_screen(theme))
-        self.resize(1536, 960)
+        self.setCentralWidget(build_studio_screen(theme, controller=controller))
+        self.resize(1680, 960)
 
 
-def build_main_window(theme: ThemeManager) -> QMainWindow:
+def build_main_window(theme: ThemeManager, *, controller=None) -> QMainWindow:
     """Build and return the permanent application host window.
 
     The window is constructed without running a Qt event loop so it can be
@@ -51,8 +52,9 @@ def build_main_window(theme: ThemeManager) -> QMainWindow:
 
     Args:
         theme: The injected theme manager (sole source of visual values).
+        controller: Optional WorkflowController for backend integration.
 
     Returns:
         The composed shell as a :class:`QMainWindow` hosting the studio screen.
     """
-    return _MainWindow(theme)
+    return _MainWindow(theme, controller=controller)

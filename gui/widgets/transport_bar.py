@@ -113,7 +113,7 @@ class TransportBar(ThemedWidget):
         )
         tc_row.setSpacing(tokens.spacing.xs)
         self._timecode = MetaLabel(
-            self._theme, "00:00:47:15", role="secondary", style="mono"
+            self._theme, "00:00:00:00", role="secondary", style="mono"
         )
         self._timecode.setObjectName("TransportTimecode")
         tc_row.addWidget(self._timecode, 0, Qt.AlignmentFlag.AlignVCenter)

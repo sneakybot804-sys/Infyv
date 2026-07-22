@@ -9,9 +9,7 @@ Run with:
 
     python -m gui.application
 
-The developer-only screen preview (``python -m gui.app_editor_preview``)
-remains available and unchanged. This launcher wires no backend and no
-:class:`gui_core.ApplicationFacade`; integration arrives in a later phase.
+Phase 3: Integration with ApplicationFacade and WorkflowController.
 """
 from __future__ import annotations
 
@@ -28,13 +26,24 @@ def main() -> int:
 
     from gui.main_window import build_main_window
     from gui.theme.manager import ThemeManager
+    from gui_core.facade import ApplicationFacade
+    from gui.integration.workflow_controller import WorkflowController
+    from config import config
 
     app = QApplication(sys.argv)
 
     theme = ThemeManager()
     theme.apply(app)
 
-    window = build_main_window(theme)
+    # Initialize backend
+    config.ensure_directories()
+    facade = ApplicationFacade(config)
+    controller = WorkflowController(facade)
+
+    # Start the controller
+    controller.start()
+
+    window = build_main_window(theme, controller=controller)
     window.show()
     return app.exec()
 
