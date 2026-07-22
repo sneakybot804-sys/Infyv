@@ -676,7 +676,11 @@ class PlaybackEngine(QObject):
             self._audio_player = None
 
     def _start_audio(self) -> None:
-        """Start audio playback from the current playhead position."""
+        """Start audio playback from the current playhead position.
+
+        Does NOT block — if audio file isn't ready yet, returns immediately.
+        Audio will start on the next play() call once extraction completes.
+        """
         self._ensure_audio_player()
         if self._audio_player is None:
             return
@@ -692,19 +696,12 @@ class PlaybackEngine(QObject):
                 from config import config as app_config
                 mp3_path = app_config.paths.output_dir / f"{Path(self._media_path).stem}.mp3"
 
-                # Wait up to 5s for background audio extraction
-                if not mp3_path.exists() and not getattr(self, '_audio_extracted', False):
-                    import time as _time
-                    for _ in range(50):
-                        _time.sleep(0.1)
-                        if mp3_path.exists():
-                            break
+                # Do NOT block — if extraction isn't done, skip audio for now
+                if not mp3_path.exists():
+                    return
 
-                if mp3_path.exists():
-                    self._audio_player.setSource(QUrl.fromLocalFile(str(mp3_path)))
-                    self._audio_loaded_for = self._media_path
-                else:
-                    return  # No audio available
+                self._audio_player.setSource(QUrl.fromLocalFile(str(mp3_path)))
+                self._audio_loaded_for = self._media_path
 
             # Sync audio position to playhead
             pos_ms = int(self._playhead * 1000)
