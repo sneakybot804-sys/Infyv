@@ -65,6 +65,8 @@ class FrameDecoder(QThread):
         self._queue: collections.deque[_FrameT] = collections.deque(maxlen=self._max_frames)
         self._mutex = QMutex()
         self._stop_event = threading.Event()
+        self._has_space = threading.Event()  # signaled when queue has room
+        self._has_space.set()  # initially has space
         self._seek_to: Optional[float] = None
         self._proc: Optional[subprocess.Popen] = None
 
@@ -96,7 +98,24 @@ class FrameDecoder(QThread):
             pts = self._queue[0][0]
             if pts > playhead + tolerance:
                 return None
-            return self._queue.popleft()
+            result = self._queue.popleft()
+            # Signal decoder that space is available
+            if len(self._queue) < self._max_frames:
+                self._has_space.set()
+            return result
+
+    def discard_one_stale(self, playhead: float) -> Optional[_FrameT]:
+        """Remove ONE frame with PTS < playhead if available.
+
+        Discards at most one frame per call to prevent burst delivery.
+        """
+        with QMutexLocker(self._mutex):
+            if self._queue and self._queue[0][0] < playhead:
+                result = self._queue.popleft()
+                if len(self._queue) < self._max_frames:
+                    self._has_space.set()
+                return result
+        return None
 
     def clear(self) -> None:
         """Clear the frame buffer."""
@@ -171,8 +190,20 @@ class FrameDecoder(QThread):
                 frame = np.frombuffer(raw, dtype=np.uint8).reshape(height, width, 3).copy()
                 frame_index += 1
 
+                # Wait for space in queue (prevents burst filling)
+                self._has_space.wait(timeout=1.0)
+                if self._stop_event.is_set():
+                    break
+
                 with QMutexLocker(self._mutex):
-                    self._queue.append((pts, frame))
+                    if len(self._queue) >= self._max_frames:
+                        # Queue full — clear event, decoder will block until space
+                        self._has_space.clear()
+                        self._queue.append((pts, frame))
+                        if len(self._queue) < self._max_frames:
+                            self._has_space.set()
+                    else:
+                        self._queue.append((pts, frame))
 
             # End of inner loop — clean up this FFmpeg instance
             self._kill_proc()
@@ -544,25 +575,26 @@ class PlaybackEngine(QObject):
                 self._correct_audio_drift()
 
     def _schedule_frame(self):
-        """Display the next frame if its PTS <= playhead.
+        """Display the current frame based on PTS.
 
-        Uses atomic pop_if_due to prevent race between peek and pop.
-        If decoder is ahead (multiple frames due), only the LAST due
-        frame is displayed — earlier ones are discarded.
+        Pops exactly ONE frame per tick if its PTS <= playhead.
+        Late frames (PTS < playhead from decoder being ahead) are
+        discarded one at a time to prevent burst delivery.
         """
         if self._decoder is None:
             return
 
-        displayed = None
-        while True:
-            frame_tuple = self._decoder.pop_if_due(self._playhead)
-            if frame_tuple is None:
-                break
+        # Try to pop one due frame
+        frame_tuple = self._decoder.pop_if_due(self._playhead)
+        if frame_tuple is not None:
             self._decoder_shown += 1
-            displayed = frame_tuple[1]  # the BGR ndarray
+            self.frame_ready.emit(frame_tuple[1])
+            return
 
-        if displayed is not None:
-            self.frame_ready.emit(displayed)
+        # No due frame — discard ONE stale frame to keep queue draining
+        stale = self._decoder.discard_one_stale(self._playhead)
+        if stale is not None:
+            self._decoder_shown += 1
 
     def _correct_audio_drift(self):
         """Resync audio position to video playhead if drift > 100ms."""
@@ -613,7 +645,7 @@ class PlaybackEngine(QObject):
         decoder = FrameDecoder(
             self._media_path,
             fps=self._fps,
-            max_frames=300,  # 5 seconds of buffer at 60fps
+            max_frames=120,  # 2 seconds of buffer — keeps decoder close to real-time
             start_at=self._playhead,
             scale_width=960,
         )
