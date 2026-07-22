@@ -613,7 +613,7 @@ class PlaybackEngine(QObject):
         decoder = FrameDecoder(
             self._media_path,
             fps=self._fps,
-            max_frames=60,
+            max_frames=300,  # 5 seconds of buffer at 60fps
             start_at=self._playhead,
             scale_width=960,
         )
