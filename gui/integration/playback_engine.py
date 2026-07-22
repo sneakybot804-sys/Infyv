@@ -289,6 +289,7 @@ class PlaybackEngine(QObject):
         self._playhead_anchor = self._playhead
         import time
         self._wall_anchor = time.monotonic()
+        self._wall_anchor_fresh = False  # Will be set True on first tick
         self._start_decoder()
         self._start_audio()
         self._tick_timer.start()
@@ -339,9 +340,30 @@ class PlaybackEngine(QObject):
 
     def _on_tick(self) -> None:
         """Engine timer tick: advance playhead, pull frame, sync Timeline."""
+        # Re-entrancy guard: prevent recursive tick calls
+        if getattr(self, '_tick_in_progress', False):
+            return
+        self._tick_in_progress = True
+        try:
+            self._on_tick_inner()
+        finally:
+            self._tick_in_progress = False
+
+    def _on_tick_inner(self) -> None:
+        """Inner tick logic — protected from re-entrancy."""
         import time
         now = time.monotonic()
         real_elapsed = now - self._wall_anchor
+
+        # If wall_anchor is stale (play() took >1s to return due to blocking
+        # audio extraction), re-anchor on the first tick so playback starts
+        # from the current position instead of jumping forward.
+        if not self._wall_anchor_fresh:
+            self._wall_anchor_fresh = True
+            if real_elapsed > 1.0:
+                self._wall_anchor = now
+                real_elapsed = 0.0
+
         self._playhead = self._playhead_anchor + (real_elapsed * self._playback_rate)
 
         # Clamp to duration
@@ -487,8 +509,8 @@ class PlaybackEngine(QObject):
         """Pull frame from decoder only when playhead reaches its timestamp.
 
         Each decoder frame corresponds to time: start + N/fps.
-        We display it ONLY when seconds >= that time (zero tolerance).
-        This gives the most accurate playback speed: <0.1% error.
+        We display it ONLY when seconds >= that time.
+        Exactly ONE frame is consumed per call — never more.
         """
         dec = self._decoder
         if dec is None:
@@ -504,21 +526,12 @@ class PlaybackEngine(QObject):
         if seconds < next_frame_time:
             return None
 
-        # Pop and display this frame
+        # Pop exactly ONE frame — the next scheduled frame
         frame = dec.pop()
         if frame is None:
             return None
 
         self._decoder_frames_shown = shown + 1
-
-        # Drop late frames if decoder is ahead of playhead
-        while start + self._decoder_frames_shown / fps < seconds - (1.0 / fps):
-            skipped = dec.pop()
-            if skipped is None:
-                break
-            frame = skipped
-            self._decoder_frames_shown += 1
-
         return frame
 
     # ------------------------------------------------------------------ #
