@@ -446,6 +446,40 @@ class PlaybackEngine(QObject):
         """Check if playback is active."""
         return self._state == "playing"
 
+    def set_volume(self, volume: float) -> None:
+        """Set audio volume (0.0 to 1.0)."""
+        if self._audio_output is not None:
+            try:
+                self._audio_output.setVolume(max(0.0, min(1.0, volume)))
+            except Exception as exc:
+                _log.warning("Volume set failed: %s", exc)
+
+    def volume(self) -> float:
+        """Get current audio volume (0.0 to 1.0)."""
+        if self._audio_output is not None:
+            try:
+                return self._audio_output.volume()
+            except Exception:
+                pass
+        return 1.0
+
+    def set_muted(self, muted: bool) -> None:
+        """Mute or unmute audio."""
+        if self._audio_output is not None:
+            try:
+                self._audio_output.setMuted(muted)
+            except Exception as exc:
+                _log.warning("Mute failed: %s", exc)
+
+    def is_muted(self) -> bool:
+        """Check if audio is muted."""
+        if self._audio_output is not None:
+            try:
+                return self._audio_output.isMuted()
+            except Exception:
+                pass
+        return False
+
     # ------------------------------------------------------------------ #
     # Internal: frame pulling (driven by Timeline's playhead)
     # ------------------------------------------------------------------ #
@@ -549,58 +583,66 @@ class PlaybackEngine(QObject):
 
         Uses ffmpeg's amix to combine multiple audio streams
         (e.g., gameplay + commentary) into one mixed output.
+        Runs in a background thread to avoid blocking the GUI.
         """
         if self._controller is None:
             return
-        try:
-            from pathlib import Path
-            import subprocess
 
-            path = Path(video_path)
-            # Use absolute path from config to avoid CWD issues
-            from config import config as app_config
-            output = app_config.paths.output_dir / f"{path.stem}.mp3"
-            output.parent.mkdir(parents=True, exist_ok=True)
-
-            if output.exists():
-                return  # Already extracted
-
-            # Probe for audio stream count
-            num_streams = 1
+        def _do_extract():
             try:
-                import ffmpeg as ff
-                probe = ff.probe(str(path))
-                num_streams = sum(
-                    1 for s in probe.get("streams", [])
-                    if s.get("codec_type") == "audio"
-                )
-            except Exception:
+                from pathlib import Path
+                import subprocess
+
+                path = Path(video_path)
+                # Use absolute path from config to avoid CWD issues
+                from config import config as app_config
+                output = app_config.paths.output_dir / f"{path.stem}.mp3"
+                output.parent.mkdir(parents=True, exist_ok=True)
+
+                if output.exists():
+                    self._audio_extracted = True
+                    return  # Already extracted
+
+                # Probe for audio stream count
                 num_streams = 1
+                try:
+                    import ffmpeg as ff
+                    probe = ff.probe(str(path))
+                    num_streams = sum(
+                        1 for s in probe.get("streams", [])
+                        if s.get("codec_type") == "audio"
+                    )
+                except Exception:
+                    num_streams = 1
 
-            if num_streams <= 1:
-                self._controller.extract_audio(video_path)
-            else:
-                # Multiple streams — mix ALL into one stereo MP3
-                # amix blends all input streams equally
-                cmd = [
-                    "ffmpeg", "-y", "-nostdin", "-loglevel", "warning",
-                    "-i", str(path),
-                    "-filter_complex",
-                    f"amix=inputs={num_streams}:duration=first:dropout_transition=2,"
-                    f"aresample=44100",
-                    "-ac", "2",
-                    "-acodec", "libmp3lame", "-q:a", "2",
-                    str(output),
-                ]
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-                if result.returncode != 0:
-                    # Fallback: simple extraction
+                if num_streams <= 1:
                     self._controller.extract_audio(video_path)
-        except Exception:
-            try:
-                self._controller.extract_audio(video_path)
+                else:
+                    # Multiple streams — mix ALL into one stereo MP3
+                    cmd = [
+                        "ffmpeg", "-y", "-nostdin", "-loglevel", "warning",
+                        "-i", str(path.resolve()),
+                        "-filter_complex",
+                        f"amix=inputs={num_streams}:duration=first:dropout_transition=2,"
+                        f"aresample=44100",
+                        "-ac", "2",
+                        "-acodec", "libmp3lame", "-q:a", "2",
+                        str(output),
+                    ]
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+                    if result.returncode != 0:
+                        self._controller.extract_audio(video_path)
+                self._audio_extracted = True
             except Exception:
-                pass
+                try:
+                    self._controller.extract_audio(video_path)
+                    self._audio_extracted = True
+                except Exception:
+                    pass
+
+        self._audio_extracted = False
+        t = threading.Thread(target=_do_extract, daemon=True)
+        t.start()
 
     def _ensure_audio_player(self) -> None:
         """Lazily create QMediaPlayer + QAudioOutput."""
@@ -636,6 +678,15 @@ class PlaybackEngine(QObject):
                 # Use absolute path from config
                 from config import config as app_config
                 mp3_path = app_config.paths.output_dir / f"{Path(self._media_path).stem}.mp3"
+
+                # Wait up to 5s for background audio extraction
+                if not mp3_path.exists() and not getattr(self, '_audio_extracted', False):
+                    import time as _time
+                    for _ in range(50):
+                        _time.sleep(0.1)
+                        if mp3_path.exists():
+                            break
+
                 if mp3_path.exists():
                     self._audio_player.setSource(QUrl.fromLocalFile(str(mp3_path)))
                     self._audio_loaded_for = self._media_path

@@ -178,16 +178,26 @@ class FFmpegService:
         self,
         video_path: str | Path,
         output_name: str | None = None,
+        stream_index: int | None = None,
     ) -> Path:
-        """Extract the audio track as an MP3 file."""
+        """Extract the audio track as an MP3 file.
+
+        Args:
+            video_path: Source video file.
+            output_name: Optional output filename.
+            stream_index: If given, extract only this audio stream (0-based).
+                         If None, extract the first/default audio stream.
+        """
         path = self._validate_input(video_path)
         output = self._output_path(output_name or f"{path.stem}.mp3")
-        logger.info("Extracting audio from %s -> %s", path.name, output.name)
+        logger.info("Extracting audio from %s -> %s (stream=%s)", path.name, output.name, stream_index)
 
         try:
+            inp = ffmpeg.input(str(path))
+            if stream_index is not None:
+                inp = inp.audio.map(f"a:{stream_index}")
             (
-                ffmpeg
-                .input(str(path))
+                inp
                 .output(str(output), vn=None, acodec="libmp3lame", **{"q:a": 2})
                 .overwrite_output()
                 .run(quiet=True)

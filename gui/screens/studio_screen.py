@@ -1971,6 +1971,22 @@ class StudioScreen(QWidget):
         if rewind_btn is not None:
             rewind_btn.mouseReleaseEvent = lambda _e: engine.seek(max(0.0, engine.playhead() - 5.0))
 
+        # Speed chip - cycle through playback rates
+        speed_chip = self._transport.findChild(QFrame, "SpeedChip")
+        speed_label_widget = speed_chip.findChild(QLabel) if speed_chip else None
+        if speed_chip is not None and speed_label_widget is not None:
+            _speeds = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 4.0]
+            _speed_idx = [3]  # mutable index, starts at 1.0x
+
+            def _cycle_speed(_e):
+                _speed_idx[0] = (_speed_idx[0] + 1) % len(_speeds)
+                rate = _speeds[_speed_idx[0]]
+                engine.set_playback_rate(rate)
+                speed_label_widget.setText(f"{rate:.1f}x" if rate != int(rate) else f"{int(rate)}.0x")
+
+            speed_chip.mouseReleaseEvent = _cycle_speed
+            speed_chip.setCursor(Qt.CursorShape.PointingHandCursor)
+
         # --- Engine signals -> UI updates ---
         def _on_playback_state(state):
             """Update button highlights based on playback state."""
