@@ -65,8 +65,6 @@ class FrameDecoder(QThread):
         self._queue: collections.deque[_FrameT] = collections.deque(maxlen=self._max_frames)
         self._mutex = QMutex()
         self._stop_event = threading.Event()
-        self._has_space = threading.Event()  # signaled when queue has room
-        self._has_space.set()  # initially has space
         self._seek_to: Optional[float] = None
         self._proc: Optional[subprocess.Popen] = None
 
@@ -98,23 +96,13 @@ class FrameDecoder(QThread):
             pts = self._queue[0][0]
             if pts > playhead + tolerance:
                 return None
-            result = self._queue.popleft()
-            # Signal decoder that space is available
-            if len(self._queue) < self._max_frames:
-                self._has_space.set()
-            return result
+            return self._queue.popleft()
 
     def discard_one_stale(self, playhead: float) -> Optional[_FrameT]:
-        """Remove ONE frame with PTS < playhead if available.
-
-        Discards at most one frame per call to prevent burst delivery.
-        """
+        """Remove ONE frame with PTS < playhead if available."""
         with QMutexLocker(self._mutex):
             if self._queue and self._queue[0][0] < playhead:
-                result = self._queue.popleft()
-                if len(self._queue) < self._max_frames:
-                    self._has_space.set()
-                return result
+                return self._queue.popleft()
         return None
 
     def clear(self) -> None:
@@ -190,20 +178,8 @@ class FrameDecoder(QThread):
                 frame = np.frombuffer(raw, dtype=np.uint8).reshape(height, width, 3).copy()
                 frame_index += 1
 
-                # Wait for space in queue (prevents burst filling)
-                self._has_space.wait(timeout=1.0)
-                if self._stop_event.is_set():
-                    break
-
                 with QMutexLocker(self._mutex):
-                    if len(self._queue) >= self._max_frames:
-                        # Queue full — clear event, decoder will block until space
-                        self._has_space.clear()
-                        self._queue.append((pts, frame))
-                        if len(self._queue) < self._max_frames:
-                            self._has_space.set()
-                    else:
-                        self._queue.append((pts, frame))
+                    self._queue.append((pts, frame))
 
             # End of inner loop — clean up this FFmpeg instance
             self._kill_proc()
