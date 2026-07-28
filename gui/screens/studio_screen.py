@@ -538,32 +538,72 @@ def _build_sidebar(theme: ThemeManager) -> QWidget:
                            tokens.spacing.xs, tokens.spacing.xs)
     col.setSpacing(0)
 
+    # --- Logo area ---
+    logo_frame = _styled(QFrame())
+    logo_frame.setObjectName("StudioLogo")
+    logo_frame.setStyleSheet(
+        f"#StudioLogo {{ background: transparent; "
+        f"padding: 4px 0px; }}"
+    )
+    logo_col = QVBoxLayout(logo_frame)
+    logo_col.setContentsMargins(tokens.spacing.md, tokens.spacing.sm,
+                                tokens.spacing.md, tokens.spacing.sm)
+    logo_col.setSpacing(2)
+    # Logo icon (geometric shape)
+    logo_icon = QLabel("⬡")
+    logo_icon.setFont(theme.font("h2"))
+    logo_icon.setStyleSheet(
+        f"color: {colors.accent_cyan}; background: transparent;"
+    )
+    logo_col.addWidget(logo_icon)
+    # App name
+    logo_title = QLabel("INFY EDITOR")
+    logo_title.setFont(theme.font("body"))
+    logo_title.setStyleSheet(
+        f"color: {colors.text_primary}; background: transparent; "
+        f"font-weight: bold; letter-spacing: 1px;"
+    )
+    logo_col.addWidget(logo_title)
+    # Subtitle
+    logo_sub = QLabel("AI GAMING EDITOR")
+    logo_sub.setFont(theme.font("caption"))
+    logo_sub.setStyleSheet(
+        f"color: {colors.accent_purple}; background: transparent; "
+        f"letter-spacing: 0.5px;"
+    )
+    logo_col.addWidget(logo_sub)
+    col.addWidget(logo_frame)
+
+    col.addSpacing(tokens.spacing.xs)
+
     # --- Navigation items ---
     nav = QVBoxLayout()
-    nav.setSpacing(0)
-    items = (
-        ("\U0001f3e0", "Dashboard", True),
-        ("\U0001f4c1", "Projects", False),
-        ("\U0001f39e", "Media", False),
-        ("\U0001f9e9", "Assets", False),
-        ("\U0001f4fd", "Timeline", False),
+    nav.setSpacing(2)
+    nav_items = (
+        ("🏠", "Dashboard", True),
+        ("📁", "Projects", False),
+        ("🎬", "Media", False),
+        ("📦", "Assets", False),
+        ("🎞️", "Timeline", False),
         ("✨", "Effects", False),
-        ("\U0001f500", "Transitions", False),
-        ("\U0001f3b5", "Audio", False),
-        ("\U0001f4dd", "Captions", False),
-        ("\U0001f4d0", "Templates", False),
-        ("\U0001f916", "AI Studio", False),
-        ("⬆", "Export", False),
-        ("⚙", "Settings", False),
+        ("🔀", "Transitions", False),
+        ("🎵", "Audio", False),
+        ("💬", "Captions", False),
+        ("📐", "Templates", False),
+        ("🤖", "AI Studio", False),
+        ("📤", "Export", False),
+        ("⚙️", "Settings", False),
     )
-    for glyph, label, active in items:
+    for glyph, label, active in nav_items:
         item = _styled(QFrame())
         item.setObjectName("StudioNavItem")
         if active:
             item.setStyleSheet(
-                f"#StudioNavItem {{ background: {colors.surface_elevated}; "
-                f"border-left: 3px solid {colors.accent_cyan}; "
-                f"border-radius: {tokens.radius.sm}px; }}"
+                f"#StudioNavItem {{ "
+                f"background: qlineargradient(x1:0, y1:0, x2:1, y2:0, "
+                f"stop:0 {colors.accent_purple}, stop:1 {colors.accent_blue}); "
+                f"border-radius: {tokens.radius.sm}px; "
+                f"border: none; }}"
             )
         else:
             item.setStyleSheet(
@@ -572,154 +612,199 @@ def _build_sidebar(theme: ThemeManager) -> QWidget:
                 f"#StudioNavItem:hover {{ background: {colors.surface}; }}"
             )
         item_row = QHBoxLayout(item)
-        item_row.setContentsMargins(tokens.spacing.md, 5, tokens.spacing.md, 5)
+        item_row.setContentsMargins(tokens.spacing.md, 6, tokens.spacing.md, 6)
         item_row.setSpacing(tokens.spacing.sm)
         icon = QLabel(glyph)
         icon.setFont(theme.font("body_small"))
         icon.setStyleSheet(
-            f"color: {colors.accent_cyan if active else colors.text_muted}; "
+            f"color: {'#ffffff' if active else colors.text_muted}; "
             f"background: transparent;"
         )
         item_row.addWidget(icon)
         text = QLabel(label)
         text.setFont(theme.font("body_small"))
         text.setStyleSheet(
-            f"color: {colors.text_primary if active else colors.text_secondary}; "
+            f"color: {'#ffffff' if active else colors.text_secondary}; "
             f"background: transparent;"
         )
         item_row.addWidget(text, 1)
         nav.addWidget(item)
     col.addLayout(nav)
 
-    col.addSpacing(tokens.spacing.xs)
+    col.addSpacing(tokens.spacing.sm)
 
     # --- System Overview card ---
     system_card = _sidebar_card(theme)
     system_col = system_card.layout()
-    system_col.addWidget(_caption(theme, "System Overview"))
-    for label, value, detail, color in (
-        ("GPU", 0, "Not detected", colors.accent_cyan),
-        ("RAM", 0, "Not detected", colors.accent_purple),
-        ("CPU", 0, "Not detected", colors.accent_blue),
+    system_col.setSpacing(tokens.spacing.xs)
+    system_head = QLabel("SYSTEM OVERVIEW")
+    system_head.setFont(theme.font("caption"))
+    system_head.setStyleSheet(
+        f"color: {colors.accent_purple}; background: transparent; "
+        f"letter-spacing: 1px; font-weight: bold;"
+    )
+    system_col.addWidget(system_head)
+
+    for label, sub, pct_val, bar_color, temp in (
+        ("GPU", "NVIDIA RTX 3060", 38, colors.accent_purple, "38°C"),
+        ("RAM", "16GB DDR4", 62, colors.accent_pink, "10.1/16GB"),
+        ("CPU", "AMD Ryzen 7 5700X", 24, colors.success, "54°C"),
     ):
+        # Label row
         head = QHBoxLayout()
+        head.setSpacing(0)
         name = QLabel(label)
         name.setFont(theme.font("body_small"))
         name.setStyleSheet(
-            f"color: {colors.text_secondary}; background: transparent;"
+            f"color: {colors.text_secondary}; background: transparent; "
+            f"font-weight: bold;"
         )
-        head.addWidget(name, 1)
-        pct = QLabel("--")
-        pct.setFont(theme.font("body_small"))
-        pct.setStyleSheet(f"color: {colors.text_muted}; background: transparent;")
-        head.addWidget(pct)
+        head.addWidget(name)
+        pct_label = QLabel(f"{pct_val}%")
+        pct_label.setFont(theme.font("caption"))
+        pct_label.setStyleSheet(
+            f"color: {bar_color}; background: transparent;"
+        )
+        head.addWidget(pct_label)
         system_col.addLayout(head)
-        system_col.addWidget(_thin_progress(theme, value, color))
-        sub = QLabel(detail)
-        sub.setFont(theme.font("caption"))
-        sub.setStyleSheet(f"color: {colors.text_muted}; background: transparent;")
-        system_col.addWidget(sub)
+
+        # Progress bar
+        system_col.addWidget(_thin_progress(theme, pct_val, bar_color))
+
+        # Sub label + temperature
+        info_row = QHBoxLayout()
+        info_row.setSpacing(0)
+        sub_label = QLabel(sub)
+        sub_label.setFont(theme.font("caption"))
+        sub_label.setStyleSheet(
+            f"color: {colors.text_muted}; background: transparent;"
+        )
+        info_row.addWidget(sub_label, 1)
+        temp_label = QLabel(temp)
+        temp_label.setFont(theme.font("caption"))
+        temp_label.setStyleSheet(
+            f"color: {bar_color}; background: transparent;"
+        )
+        info_row.addWidget(temp_label)
+        system_col.addLayout(info_row)
+
+        system_col.addSpacing(tokens.spacing.xs)
+
     col.addWidget(system_card)
 
     col.addSpacing(tokens.spacing.sm)
 
-    # --- AI Engine / Render Engine status card ---
+    # --- AI Engine / Render Engine card ---
     engine_card = _sidebar_card(theme)
     engine_col = engine_card.layout()
-    # AI ENGINE row
-    ai_line = QHBoxLayout()
-    ai_label = QLabel("AI ENGINE")
-    ai_label.setFont(theme.font("caption"))
-    ai_label.setStyleSheet(
-        f"color: {colors.text_secondary}; background: transparent;"
+    engine_col.setSpacing(tokens.spacing.xs)
+
+    # AI ENGINE header
+    ai_head = QLabel("AI ENGINE")
+    ai_head.setFont(theme.font("caption"))
+    ai_head.setStyleSheet(
+        f"color: {colors.accent_purple}; background: transparent; "
+        f"letter-spacing: 1px; font-weight: bold;"
     )
-    ai_line.addWidget(ai_label, 1)
-    ai_status = QLabel("--")
-    ai_status.setFont(theme.font("caption"))
-    ai_status.setStyleSheet(
-        f"color: {colors.text_muted}; background: transparent;"
-    )
-    ai_line.addWidget(ai_status)
-    engine_col.addLayout(ai_line)
+    engine_col.addWidget(ai_head)
+
     # NPU / AI row
-    npu_line = QHBoxLayout()
+    npu_row = QHBoxLayout()
+    npu_row.setSpacing(0)
     npu_label = QLabel("NPU / AI >")
-    npu_label.setFont(theme.font("caption"))
+    npu_label.setFont(theme.font("body_small"))
     npu_label.setStyleSheet(
         f"color: {colors.text_secondary}; background: transparent;"
     )
-    npu_line.addWidget(npu_label, 1)
-    npu_val = QLabel("--")
-    npu_val.setFont(theme.font("caption"))
-    npu_val.setStyleSheet(
+    npu_row.addWidget(npu_label, 1)
+    npu_status = QLabel("Active")
+    npu_status.setFont(theme.font("body_small"))
+    npu_status.setStyleSheet(
+        f"color: {colors.success}; background: transparent;"
+    )
+    npu_row.addWidget(npu_status)
+    npu_chevron = QLabel("›")
+    npu_chevron.setFont(theme.font("body"))
+    npu_chevron.setStyleSheet(
         f"color: {colors.text_muted}; background: transparent;"
     )
-    npu_line.addWidget(npu_val)
-    engine_col.addLayout(npu_line)
-    # RENDER ENGINE row
-    render_line = QHBoxLayout()
-    render_label = QLabel("RENDER ENGINE")
-    render_label.setFont(theme.font("caption"))
+    npu_row.addWidget(npu_chevron)
+    engine_col.addLayout(npu_row)
+
+    # Divider
+    divider = QFrame()
+    divider.setFrameShape(QFrame.Shape.HLine)
+    divider.setStyleSheet(
+        f"color: {colors.divider}; background: {colors.divider}; max-height: 1px;"
+    )
+    engine_col.addWidget(divider)
+
+    # RENDER ENGINE header
+    render_head = QLabel("RENDER ENGINE")
+    render_head.setFont(theme.font("caption"))
+    render_head.setStyleSheet(
+        f"color: {colors.accent_purple}; background: transparent; "
+        f"letter-spacing: 1px; font-weight: bold;"
+    )
+    engine_col.addWidget(render_head)
+
+    # Render engine row
+    render_row = QHBoxLayout()
+    render_row.setSpacing(0)
+    render_label = QLabel("CUDA (GPU)")
+    render_label.setFont(theme.font("body_small"))
     render_label.setStyleSheet(
-        f"color: {colors.text_secondary}; background: transparent;"
+        f"color: {colors.success}; background: transparent;"
     )
-    render_line.addWidget(render_label, 1)
-    render_status = QLabel("--")
-    render_status.setFont(theme.font("caption"))
-    render_status.setStyleSheet(
+    render_row.addWidget(render_label, 1)
+    render_chevron = QLabel("›")
+    render_chevron.setFont(theme.font("body"))
+    render_chevron.setStyleSheet(
         f"color: {colors.text_muted}; background: transparent;"
     )
-    render_line.addWidget(render_status)
-    engine_col.addLayout(render_line)
-    # Render detail row
-    render_detail = QLabel("--")
-    render_detail.setFont(theme.font("caption"))
-    render_detail.setStyleSheet(
-        f"color: {colors.text_muted}; background: transparent;"
-    )
-    engine_col.addWidget(render_detail)
+    render_row.addWidget(render_chevron)
+    engine_col.addLayout(render_row)
+
     col.addWidget(engine_card)
 
-    # --- User profile card at bottom ---
+    # --- User profile at bottom ---
     user_card = _styled(QFrame())
     user_card.setObjectName("StudioUserProfile")
     user_card.setStyleSheet(
-        f"#StudioUserProfile {{ background: {colors.surface_elevated}; "
-        f"border: 1px solid {colors.border}; "
-        f"border-radius: {tokens.radius.md}px; }}"
+        f"#StudioUserProfile {{ background: transparent; border: none; }}"
     )
     user_row = QHBoxLayout(user_card)
     user_row.setContentsMargins(tokens.spacing.md, tokens.spacing.sm,
                                 tokens.spacing.md, tokens.spacing.sm)
     user_row.setSpacing(tokens.spacing.md)
 
-    # User avatar (circular with generic initial, gradient)
+    # User avatar (circular with initial)
     avatar = _styled(QFrame())
-    avatar.setFixedSize(36, 36)
+    avatar.setFixedSize(32, 32)
     avatar.setStyleSheet(
         f"background: qlineargradient(x1:0, y1:0, x2:1, y2:1, "
         f"stop:0 {colors.accent_cyan}, stop:1 {colors.accent_purple}); "
-        f"border-radius: 18px;"
+        f"border-radius: 16px;"
     )
-    avatar_label = QLabel("U", avatar)
+    avatar_label = QLabel("I", avatar)
     avatar_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    avatar_label.setFont(theme.font("h3"))
+    avatar_label.setFont(theme.font("body_small"))
     avatar_label.setStyleSheet(
-        f"color: {colors.text_on_accent}; background: transparent;"
+        f"color: {colors.text_on_accent}; background: transparent; font-weight: bold;"
     )
-    avatar_label.setGeometry(0, 0, 36, 36)
+    avatar_label.setGeometry(0, 0, 32, 32)
     user_row.addWidget(avatar)
 
     # User info (name and plan)
     user_info = QVBoxLayout()
     user_info.setSpacing(0)
-    user_name = QLabel("User")
+    user_name = QLabel("Infy")
     user_name.setFont(theme.font("body_small"))
     user_name.setStyleSheet(
-        f"color: {colors.text_primary}; background: transparent;"
+        f"color: {colors.text_primary}; background: transparent; font-weight: bold;"
     )
     user_info.addWidget(user_name)
-    user_plan = QLabel("No plan")
+    user_plan = QLabel("Creator")
     user_plan.setFont(theme.font("caption"))
     user_plan.setStyleSheet(
         f"color: {colors.text_muted}; background: transparent;"
@@ -728,7 +813,7 @@ def _build_sidebar(theme: ThemeManager) -> QWidget:
     user_row.addLayout(user_info, 1)
 
     # Chevron/arrow
-    chevron = QLabel(">")
+    chevron = QLabel("⌄")
     chevron.setFont(theme.font("body"))
     chevron.setStyleSheet(
         f"color: {colors.text_muted}; background: transparent;"
