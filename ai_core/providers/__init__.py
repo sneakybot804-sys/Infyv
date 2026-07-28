@@ -16,6 +16,7 @@ from ai_core.errors import AIConfigError
 from ai_core.providers.base import AIProvider
 from ai_core.providers.claude_provider import ClaudeProvider
 from ai_core.providers.gemini_provider import GeminiProvider
+from ai_core.providers.ollama_provider import OllamaProvider
 from ai_core.providers.omniroute_provider import OmniRouteProvider
 from ai_core.providers.openai_provider import OpenAICompatProvider
 
@@ -25,6 +26,7 @@ PROVIDER_CLASSES: Dict[str, Type[AIProvider]] = {
     "openai": OpenAICompatProvider,
     "claude": ClaudeProvider,
     "gemini": GeminiProvider,
+    "ollama": OllamaProvider,
 }
 
 

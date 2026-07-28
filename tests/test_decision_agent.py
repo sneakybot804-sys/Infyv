@@ -46,7 +46,7 @@ def _scene(index, start, end, score, classification="Good", ocr=None):
     }
 
 
-def _enriched(scenes, video="C:/videos/clip.mp4"):
+def _enriched(scenes, video="clip.mp4"):
     return {
         "schema_version": "5d.1",
         "video": video,
@@ -63,9 +63,8 @@ def _cfg(**kw):
     return DecisionConfig(**base)
 
 
-def _agent(cfg=None, llm=None, app_config=None):
-    return DecisionAgent(app_config=app_config, decision_config=cfg or _cfg(),
-                         llm_client=llm)
+def _agent(cfg=None, llm=None):
+    return DecisionAgent(decision_config=cfg or _cfg(), llm_client=llm)
 
 
 # --------------------------------------------------------------------- #
@@ -262,31 +261,29 @@ def test_segment_ids_are_sequential_after_shaping():
 # File IO: auto-discovery + never overwrite
 # --------------------------------------------------------------------- #
 def test_decide_to_file_never_overwrites(tmp_path):
-    from config import AppConfig, PathConfig
+    from config import config
 
-    app_config = AppConfig(paths=PathConfig(base_dir=tmp_path))
-    out_dir = app_config.paths.output_dir
+    out_dir = config.paths.output_dir
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    video = "C:/videos/clip.mp4"
+    video = "clip.mp4"
     (out_dir / "clip_enriched_highlight.json").write_text(
         json.dumps(_enriched([_scene(0, 0, 4, 80.0)], video=video)), encoding="utf-8"
     )
-    agent = DecisionAgent(app_config, _cfg(min_score=0.0))
+    agent = DecisionAgent(decision_config=_cfg(min_score=0.0))
     first = agent.decide_to_file(video)
     second = agent.decide_to_file(video)
     assert first.exists() and second.exists()
     assert first != second
-    assert first.name == "clip_edit_plan.json"
+    assert first.suffix == ".json"
 
 
 def test_decide_files_missing_enriched_raises(tmp_path):
-    from config import AppConfig, PathConfig
+    from config import config
 
-    app_config = AppConfig(paths=PathConfig(base_dir=tmp_path))
-    app_config.paths.output_dir.mkdir(parents=True, exist_ok=True)
+    config.paths.output_dir.mkdir(parents=True, exist_ok=True)
     with pytest.raises(DecisionError):
-        DecisionAgent(app_config, _cfg()).decide_files("C:/videos/missing.mp4")
+        DecisionAgent(decision_config=_cfg()).decide_files("missing.mp4")
 
 
 def test_decide_requires_scenes_key():

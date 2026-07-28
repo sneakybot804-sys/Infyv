@@ -42,6 +42,45 @@ class PathConfig:
         return self.base_dir / "logs"
 
 
+@dataclass
+class AiSettings:
+    """Mutable AI provider settings persisted in the session.
+
+    These settings control which AI provider is active and how it is
+    configured. They are intentionally mutable (not frozen) so the CLI
+    can update them at runtime.
+    """
+
+    provider: str = "ollama"
+
+    # Ollama settings
+    ollama_host: str = "http://localhost:11434"
+    ollama_model: str = "qwen3:8b"
+
+    # OpenAI settings
+    openai_api_key: str = ""
+    openai_model: str = "gpt-5"
+
+    # Common
+    temperature: float = 0.7
+    request_timeout: int = 120
+
+    @property
+    def available_providers(self) -> tuple[str, ...]:
+        return ("ollama", "openai")
+
+    @property
+    def openai_models(self) -> tuple[str, ...]:
+        return ("gpt-5.5", "gpt-5", "gpt-4.1")
+
+    def validate(self) -> None:
+        if self.provider not in self.available_providers:
+            raise ValueError(
+                f"Unknown provider '{self.provider}'. "
+                f"Available: {', '.join(self.available_providers)}"
+            )
+
+
 @dataclass(frozen=True)
 class AppConfig:
     """Top-level application configuration."""

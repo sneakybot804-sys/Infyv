@@ -7,8 +7,8 @@ the future Phase 6 renderer.
 Hard boundaries (Phase 5E design):
 - **Independent of ``agent.py``.** This module never imports the existing
   ``GamingEditorAgent`` or its error type. It defines its own error
-  (``DecisionError``) and its own thin Ollama client behind a small
-  :class:`LlmClient` Protocol so tests inject a fake (no network).
+  (``DecisionError``) and uses the provider system via
+  :class:`AiProviderClient`.
 - **Pure consumer.** Reads the enriched artifact (and optional analysis for
   metadata) and writes ``edit_plan.json`` only. No producer import, no
   producer mutation.
@@ -23,16 +23,16 @@ from __future__ import annotations
 
 import json
 import re
-import urllib.error
-import urllib.request
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
-from config import AppConfig, config
+from ai_provider_factory import AiProviderClient, ProviderFactoryError, build_ai_client
+from config import config
 from decision_config import DecisionConfig, DecisionError, FallbackStrategy
 from logger import get_logger
 from prompts.decision_plan import SYSTEM_PROMPT, build_decision_prompt
+from session import session
 
 logger = get_logger(__name__)
 
@@ -54,56 +54,22 @@ class LlmClient(Protocol):
         ...
 
 
-class OllamaDecisionClient:
-    """Thin, decision-specific Ollama client (own implementation).
+class ProviderDecisionClient:
+    """Thin adapter wrapping :class:`AiProviderClient` for the decision pipeline.
 
-    Mirrors the local ``/api/generate`` call pattern but is intentionally
-    separate from ``agent.py`` so the decision pipeline carries no dependency
-    on the existing agent. Failures raise :class:`DecisionError`, which the
-    agent catches to trigger the deterministic fallback.
+    Conforms to the ``LlmClient`` Protocol so tests can still inject a fake.
     """
 
-    def __init__(
-        self, app_config: AppConfig | None = None, temperature: float | None = None
-    ) -> None:
-        self._ollama = (app_config or config).ollama
-        self._temperature = (
-            temperature if temperature is not None else self._ollama.temperature
-        )
+    def __init__(self, client: AiProviderClient) -> None:
+        self._client = client
 
     def generate(self, system: str, prompt: str) -> str:
-        url = f"{self._ollama.host}/api/generate"
-        payload: dict[str, Any] = {
-            "model": self._ollama.model,
-            "prompt": prompt,
-            "system": system,
-            "stream": False,
-            "options": {"temperature": self._temperature},
-        }
-        data = json.dumps(payload).encode("utf-8")
-        request = urllib.request.Request(
-            url,
-            data=data,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
         try:
-            with urllib.request.urlopen(
-                request, timeout=self._ollama.request_timeout
-            ) as response:
-                body = response.read().decode("utf-8")
-        except (urllib.error.URLError, TimeoutError) as exc:
-            raise DecisionError(
-                f"Could not reach Ollama at {self._ollama.host}: {exc}"
-            ) from exc
-        try:
-            parsed = json.loads(body)
-        except json.JSONDecodeError as exc:
-            raise DecisionError("Received invalid JSON envelope from Ollama.") from exc
-        text = str(parsed.get("response", ""))
-        if not text:
-            raise DecisionError("Ollama returned an empty response.")
-        return text
+            return self._client.generate(system, prompt)
+        except ProviderFactoryError as exc:
+            raise DecisionError(str(exc)) from exc
+        except Exception as exc:
+            raise DecisionError(f"Provider error: {exc}") from exc
 
 
 # --------------------------------------------------------------------- #
@@ -147,20 +113,18 @@ class DecisionAgent:
 
     def __init__(
         self,
-        app_config: AppConfig | None = None,
         decision_config: DecisionConfig | None = None,
         llm_client: LlmClient | None = None,
     ) -> None:
         """Create the agent.
 
         Args:
-            app_config: Shared application config (paths, ollama).
             decision_config: Selection/shaping tunables and LLM controls.
             llm_client: Injectable text client. When None and ``use_llm`` is
-                True, a thin :class:`OllamaDecisionClient` is built lazily.
-                Injecting a fake keeps unit tests network-free.
+                True, a :class:`ProviderDecisionClient` is built lazily from
+                the session's AI settings. Injecting a fake keeps unit tests
+                network-free.
         """
-        self._config = app_config or config
         self._decision = decision_config or DecisionConfig()
         self._decision.validate()
         self._llm_client = llm_client
@@ -246,7 +210,7 @@ class DecisionAgent:
         plan = self.decide_files(
             video, enriched_path=enriched_path, analysis_path=analysis_path
         )
-        out_dir = self._config.paths.output_dir
+        out_dir = config.paths.output_dir
         out_dir.mkdir(parents=True, exist_ok=True)
         stem = self._stem_for_output(video, plan.source_video)
         base_name = output_name or f"{stem}_edit_plan.json"
@@ -369,12 +333,10 @@ class DecisionAgent:
         return obj
 
     def _resolve_client(self) -> LlmClient:
-        """Return the injected client or build the default Ollama client."""
+        """Return the injected client or build a default from session settings."""
         if self._llm_client is not None:
             return self._llm_client
-        return OllamaDecisionClient(
-            self._config, temperature=self._decision.temperature_override
-        )
+        return ProviderDecisionClient(build_ai_client(session.ai_settings))
 
     # ------------------------------------------------------------------ #
     # Deterministic fallback
@@ -498,7 +460,7 @@ class DecisionAgent:
         analysis_path: str | Path | None,
     ) -> tuple[Path, Path | None]:
         """Resolve artifact paths from explicit args or naming convention."""
-        out_dir = self._config.paths.output_dir
+        out_dir = config.paths.output_dir
         stem = Path(str(video)).stem if video is not None else None
 
         def discover(explicit: str | Path | None, suffix: str) -> Path | None:
